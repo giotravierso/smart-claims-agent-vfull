@@ -9,11 +9,16 @@ de dades (la persistència és best-effort dins de process_claim).
 """
 import asyncio
 import os
+import random
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.agents.orchestrator import process_claim  # noqa: E402
+
+# Llavor fixa perquè la demostració sigui REPRODUÏBLE (el mock check_fraud usa
+# random). Així cada cas mostra sempre el mateix camí davant del tribunal.
+random.seed(20)
 
 FULL_DOCS = ["foto_danys", "factura", "acta_policial"]
 
