@@ -213,7 +213,7 @@ def build_pdf():
     story.append(Spacer(1, 0.3 * cm))
     story.append(Paragraph(
         "MVP de agente IA autónomo que gestiona el ciclo completo de una reclamación de siniestro "
-        "para <b>Seguros Pepín S.A.</b> (empresa ficticia). El agente integra LLMs con capacidades "
+        "para <b>Seguros Pepín S.A.</b> (empresa real). El agente integra LLMs con capacidades "
         "de visión (VLM) y ejecución de herramientas (Function Calling) para analizar correos y "
         "documentos adjuntos, contrastarlos con pólizas corporativas y ejecutar automáticamente "
         "la resolución óptima (pago, rechazo o solicitud de información), reduciendo la intervención "

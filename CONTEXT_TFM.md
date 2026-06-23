@@ -15,7 +15,7 @@
 | **Carga** | 10 ECTS |
 | **Normativa** | APA 7.ª edición · Art. 5 (estructura) · Art. 7 (originalidad y citas) |
 | **Edición** | 2510 (curso 2025–2026) |
-| **Empresa de referencia** | Seguros Pepín, S.A. (empresa ficticia) |
+| **Empresa de referencia** | Seguros Pepín, S.A. (empresa real; caso de uso real del sector asegurador) |
 | **Repositorio** | https://github.com/[org]/TFM |
 
 ---
@@ -50,12 +50,12 @@ Cinco capas funcionales más dos transversales:
 - Router de agentes · Human-in-the-Loop (HITL)
 
 ### Capa 3 — Agentes especializados
-- **Agente A:** Orquestador LangGraph ReAct ✅ implementado
-- **Agente B:** Validación documental (pendiente)
-- **Agente C:** Extracción multimodal VLM (pendiente)
-- **Agente D:** Verificación de cobertura RAG (pendiente)
-- **Agente E:** Resolución autónoma (pendiente)
-- **Agente G:** Fraude y cumplimiento LA/FT (pendiente)
+- **Agente A:** Orquestador LangGraph ✅ implementado
+- **Agente B:** Validación documental ✅ implementado (mock)
+- **Agente C:** Extracción multimodal VLM ✅ implementado (mock)
+- **Agente D:** Verificación de cobertura RAG ✅ implementado (mock; RAG real en fase posterior)
+- **Agente E:** Resolución autónoma ✅ implementado
+- **Agente G:** Fraude y cumplimiento LA/FT ✅ implementado (mock)
 
 ### Capa 4 — Datos y conocimiento
 - ChromaDB (pólizas, RAG) · MariaDB (log decisiones, HITL)
@@ -282,17 +282,19 @@ Arranque: `docker compose up -d` desde la raíz del repositorio.
 - [x] Guía de inicio rápido para el equipo (PDF)
 
 ### En curso — Entrega 2 (hasta 26/06/2026)
+- [x] Agente B — Validación documental (nodo determinista + mock tool)
+- [x] Agente C — Extracción multimodal VLM (mock)
+- [x] Agente D — Verificación de cobertura RAG (mock; RAG real en fase posterior)
+- [x] Agente E — Resolución autónoma (PAGO / RECHAZO / HITL)
+- [x] Agente G — Fraude y cumplimiento (filtro temprano)
+- [x] Orquestación LangGraph end-to-end con persistencia de decisiones (20 tests verde)
+- [x] CLI de demostración reproducible (`backend/scripts/run_demo.py`)
+- [x] Capítulo Arquitectura en la memoria (`docs/memoria/01-arquitectura.md`)
+- [x] Catálogo de herramientas en la memoria (`docs/memoria/02-herramientas.md`)
+- [x] Manual de usuario (`docs/memoria/03-manual-usuario.md`)
 - [ ] Dataset sintético de siniestros (data/synthetic/)
 - [ ] Ingesta de pólizas en ChromaDB (scripts/ingest_policies.py)
-- [ ] Agente B — Validación documental
-- [ ] Agente C — Extracción multimodal VLM
-- [ ] Agente D — Verificación de cobertura RAG
-- [ ] Agente E — Resolución autónoma
-- [ ] Agente G — Fraude y cumplimiento
-- [ ] Dashboard Streamlit completo (CoT visible, HITL panel)
-- [ ] Capítulo Arquitectura en la memoria (E2)
-- [ ] Catálogo de herramientas en la memoria (E2)
-- [ ] Manual de usuario (1 página)
+- [ ] Dashboard Streamlit completo (CoT visible, HITL panel) — no prioritario en E2
 - [ ] Fijar targets numéricos de los KPIs
 - [ ] Vídeo de demostración (≤ 4 min)
 
