@@ -24,8 +24,11 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
+    """Crea el esquema si no existe (idempotente). En Docker, init.sql ja el
+    crea; això cobreix l'execució local/tests i manté SQLAlchemy com a font."""
+    from app.db import models  # noqa: F401 — registra les taules a Base.metadata
     async with engine.begin() as conn:
-        await conn.run_sync(lambda c: None)
+        await conn.run_sync(Base.metadata.create_all)
 
 
 async def get_db():
