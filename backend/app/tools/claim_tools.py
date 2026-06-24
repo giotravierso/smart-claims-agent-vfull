@@ -1,9 +1,11 @@
 """
-Mock APIs simulades per al prototip Smart-Claims.
+Mock APIs simuladas para el prototipo Smart-Claims Agent.
 
-Cada funció simula una crida a un sistema extern real (core assegurador,
-passarel·la de pagament, sistema de notificacions). En Fase II es
-substituiran per integracions reals.
+Cada función simula una llamada a un sistema externo real (core asegurador,
+pasarela de pago, sistema de notificaciones, listas OFAC). En la Fase II
+de producción se sustituirán por integraciones reales con los sistemas de
+Seguros Pepín. La estructura `@tool` de LangChain permite que los agentes
+las invoquen directamente y registra automáticamente la firma y docstring.
 """
 from __future__ import annotations
 
@@ -16,242 +18,205 @@ from langchain_core.tools import tool
 logger = logging.getLogger(__name__)
 
 
-# ── Tools que pot cridar l'orquestrador ───────────────────────────────────
+# ── Documentos requeridos por tipo de siniestro ───────────────────────────
+# Esta tabla se usa también en el Agente B; se expone como constante para
+# que ambos (tool y agente) compartan la misma fuente de verdad.
+
+REQUIRED_DOCS_BY_TYPE: dict[str, list[str]] = {
+    "danys_propis":    ["foto_danys", "factura", "denuncia_companyia"],
+    "responsabilitat": ["foto_danys", "acta_policial", "dades_tercer"],
+    "robatori":        ["acta_policial", "llista_objectes_robats"],
+    "danys_mecanics":  ["informe_taller", "factura"],
+    "default":         ["foto_danys", "factura"],
+}
+
+
+# ── Tools que invocan los agentes ─────────────────────────────────────────
 
 @tool
-def validate_documents(claim_id: str, doc_types: list[str]) -> dict:
+def validate_documents(claim_id: str, claim_type: str, doc_types: list[str]) -> dict:
     """
-    Valida que la reclamació conté tots els documents requerits.
+    Valida que la reclamación contiene todos los documentos requeridos
+    para el tipo de siniestro indicado.
 
     Args:
-        claim_id: ID de l'expedient.
-        doc_types: Tipus de documents adjuntats (ex: ['foto_danys', 'factura']).
+        claim_id:   Identificador del expediente.
+        claim_type: Tipo de siniestro (danys_propis, responsabilitat, etc.).
+        doc_types:  Documentos aportados por el cliente.
 
     Returns:
-        Diccionari amb is_valid, missing_docs i contract_active.
+        is_valid (bool), missing_docs (list[str]), required_docs (list[str]),
+        contract_active (bool), checked_at (str ISO).
     """
-    required = {"foto_danys", "factura", "acta_policial"}
-    provided = set(doc_types)
-    missing = required - provided
+    required = REQUIRED_DOCS_BY_TYPE.get(claim_type, REQUIRED_DOCS_BY_TYPE["default"])
+    provided = set(doc_types or [])
+    missing  = [d for d in required if d not in provided]
+
     return {
-        "claim_id": claim_id,
-        "is_valid": len(missing) == 0,
-        "missing_docs": list(missing),
-        "contract_active": True,  # Mock: sempre actiu
-        "checked_at": datetime.utcnow().isoformat(),
+        "claim_id":        claim_id,
+        "claim_type":      claim_type,
+        "is_valid":        len(missing) == 0,
+        "missing_docs":    missing,
+        "required_docs":   required,
+        "provided_docs":   list(provided),
+        "contract_active": True,
+        "checked_at":      datetime.utcnow().isoformat(),
     }
 
 
 @tool
 def extract_multimodal(claim_id: str, file_url: str, doc_type: str) -> dict:
     """
-    Extreu dades estructurades d'un document o imatge via VLM.
+    Extrae datos estructurados de un documento o imagen mediante VLM.
 
-    Args:
-        claim_id: ID de l'expedient.
-        file_url: URL o path de l'arxiu.
-        doc_type: Tipus de document ('factura' | 'foto_danys' | 'acta').
-
-    Returns:
-        Dades extretes: import, data, tipus_dany, confiança.
+    En producción invocaría a Claude Vision sobre los adjuntos reales
+    (facturas, fotos de daños, actas policiales). La versión mock devuelve
+    datos plausibles con una puntuación de confianza simulada.
     """
-    # Simulació: en producció crida Claude claude-sonnet-4-20250514 amb visió
     mock_data = {
-        "factura":     {"amount": round(random.uniform(500, 8000), 2), "date": "2025-05-10", "vendor": "Taller Martínez"},
-        "foto_danys":  {"damage_type": "colisió frontal", "severity": "moderat", "estimated_repair": 3200},
-        "acta":        {"incident_date": "2025-05-08", "parties": 2, "fault_party": "tercer"},
+        "factura":         {"amount": round(random.uniform(500, 8000), 2),
+                            "date":   "2026-05-10",
+                            "vendor": "Taller Martinez"},
+        "foto_danys":      {"damage_type": "colision frontal",
+                            "severity": "moderado",
+                            "estimated_repair": 3200},
+        "acta_policial":   {"incident_date": "2026-05-08",
+                            "parties": 2,
+                            "fault_party": "tercero"},
+        "denuncia_companyia": {"reported_at": "2026-05-09",
+                               "incident_summary": "Colision en parking"},
+        "informe_taller":  {"diagnosis": "Averia transmision",
+                            "estimated_cost": 1800},
+        "dades_tercer":    {"third_party_id": "X123456",
+                            "insurer": "Otra aseguradora"},
+        "llista_objectes_robats": {"items_count": 5, "estimated_value": 1500},
     }
-    data = mock_data.get(doc_type, {})
+
+    data = mock_data.get(doc_type, {"info": "documento no reconocido"})
     return {
-        "claim_id": claim_id,
-        "doc_type": doc_type,
-        "extracted": data,
-        "confidence": round(random.uniform(0.82, 0.98), 3),
-        "model": "claude-sonnet-4-20250514 (mock)",
+        "claim_id":    claim_id,
+        "doc_type":    doc_type,
+        "extracted":   data,
+        "confidence":  round(random.uniform(0.82, 0.98), 3),
+        "model":       "claude-sonnet-4-6 (mock)",
+        "extracted_at": datetime.utcnow().isoformat(),
     }
 
 
 @tool
 def check_policy(claim_id: str, claim_type: str, amount: float) -> dict:
     """
-    Consulta la base de coneixement (RAG) per verificar cobertura i límits.
-
-    Args:
-        claim_id: ID de l'expedient.
-        claim_type: Tipus de sinistre (ex: 'danys_propis', 'responsabilitat').
-        amount: Import reclamat en €.
+    Consulta la base de conocimiento (RAG en fase posterior) para verificar
+    cobertura, limite maximo y franquicia segun el tipo de siniestro.
 
     Returns:
-        coverage (bool), max_amount, deductible, policy_section.
+        covered (bool), max_coverage (float), deductible (float),
+        net_payable (float), policy_section (str).
     """
     coverage_rules = {
-        "danys_propis":      {"covered": True,  "max": 10000, "deductible": 300},
-        "responsabilitat":   {"covered": True,  "max": 50000, "deductible": 0},
-        "robatori":          {"covered": True,  "max": 8000,  "deductible": 500},
-        "danys_mecànics":    {"covered": False, "max": 0,     "deductible": 0},
+        "danys_propis":    {"covered": True,  "max": 10000, "deductible": 300,
+                            "section": "SP-PCS-009 § 3.2"},
+        "responsabilitat": {"covered": True,  "max": 50000, "deductible": 0,
+                            "section": "SP-PCS-009 § 4.1"},
+        "robatori":        {"covered": True,  "max": 8000,  "deductible": 500,
+                            "section": "SP-PCS-009 § 5.0"},
+        "danys_mecanics":  {"covered": False, "max": 0,     "deductible": 0,
+                            "section": "SP-PCS-009 § 7.3 (exclusion)"},
     }
-    rule = coverage_rules.get(claim_type, {"covered": False, "max": 0, "deductible": 0})
+
+    rule = coverage_rules.get(claim_type, {
+        "covered": False, "max": 0, "deductible": 0,
+        "section": "tipo no catalogado",
+    })
+
+    net_payable = (
+        max(0, min(amount, rule["max"]) - rule["deductible"])
+        if rule["covered"] else 0.0
+    )
+
     return {
-        "claim_id": claim_id,
-        "claim_type": claim_type,
+        "claim_id":         claim_id,
+        "claim_type":       claim_type,
         "amount_requested": amount,
-        "covered": rule["covered"],
-        "max_coverage": rule["max"],
-        "deductible": rule["deductible"],
-        "net_payable": max(0, min(amount, rule["max"]) - rule["deductible"]) if rule["covered"] else 0,
-        "policy_section": "SP-PCS-009 § 3.2",
-    }
-
-
-@tool
-def approve_payment(claim_id: str, amount: float, iban: str) -> dict:
-    """
-    Simula l'emissió d'una transferència de pagament.
-
-    Args:
-        claim_id: ID de l'expedient.
-        amount: Import a pagar en €.
-        iban: IBAN del beneficiari.
-
-    Returns:
-        transaction_id, status, scheduled_date.
-    """
-    logger.info("MOCK PAYMENT — Expedient %s: %.2f€ → %s", claim_id, amount, iban[-4:])
-    return {
-        "claim_id": claim_id,
-        "transaction_id": f"TXN-{claim_id}-{random.randint(10000,99999)}",
-        "amount": amount,
-        "iban_last4": iban[-4:],
-        "status": "scheduled",
-        "scheduled_date": "2025-05-15",
-    }
-
-
-@tool
-def send_rejection(claim_id: str, reason: str, client_email: str) -> dict:
-    """
-    Simula l'enviament d'un email de rebuig justificat al client.
-
-    Args:
-        claim_id: ID de l'expedient.
-        reason: Motiu del rebuig (ha de ser clar i justificat).
-        client_email: Email de contacte del client.
-
-    Returns:
-        email_id, sent_at, reason_summary.
-    """
-    logger.info("MOCK REJECTION — Expedient %s → %s", claim_id, client_email)
-    return {
-        "claim_id": claim_id,
-        "email_id": f"EMAIL-{claim_id}-REJ",
-        "sent_to": client_email,
-        "reason_summary": reason[:200],
-        "sent_at": datetime.utcnow().isoformat(),
-    }
-
-
-@tool
-def request_more_info(claim_id: str, missing_fields: list[str], client_email: str) -> dict:
-    """
-    Sol·licita informació addicional al client per continuar el tràmit.
-
-    Args:
-        claim_id: ID de l'expedient.
-        missing_fields: Llista de camps o documents que manquen.
-        client_email: Email de contacte del client.
-
-    Returns:
-        request_id, fields_requested, deadline_days.
-    """
-    logger.info("MOCK INFO REQUEST — Expedient %s: %s", claim_id, missing_fields)
-    return {
-        "claim_id": claim_id,
-        "request_id": f"INFO-{claim_id}-{random.randint(100,999)}",
-        "fields_requested": missing_fields,
-        "sent_to": client_email,
-        "deadline_days": 10,
+        "covered":          rule["covered"],
+        "max_coverage":     rule["max"],
+        "deductible":       rule["deductible"],
+        "net_payable":      net_payable,
+        "policy_section":   rule["section"],
     }
 
 
 @tool
 def check_fraud(claim_id: str, client_id: str, amount: float) -> dict:
     """
-    Verifica el client contra llistes OFAC/ONU i detecta patrons de frau.
-
-    Args:
-        claim_id: ID de l'expedient.
-        client_id: Identificador del client (DNI/passaport anonimitzat).
-        amount: Import reclamat.
-
-    Returns:
-        is_flagged, risk_score, ofac_match, fraud_indicators.
+    Verifica al cliente contra listas OFAC/ONU y calcula un score de fraude.
+    En produccion consultaria un servicio corporativo de AML/sancions.
+    El mock genera un riesgo aleatorio bajo para que algunos casos se
+    marquen y se pueda demostrar el corte temprano del flujo.
     """
-    # Mock: 5% de probabilitat de flag per testing
     risk_score = round(random.uniform(0.01, 0.35), 3)
+
     return {
-        "claim_id": claim_id,
-        "client_id_hash": hash(client_id) % 100000,
-        "is_flagged": risk_score > 0.30,
-        "risk_score": risk_score,
-        "ofac_match": False,
-        "fraud_indicators": [] if risk_score < 0.25 else ["import_inusual"],
+        "claim_id":          claim_id,
+        "client_id_hash":    hash(client_id) % 100000,
+        "is_flagged":        risk_score > 0.30,
+        "risk_score":        risk_score,
+        "ofac_match":        False,
+        "fraud_indicators":  [] if risk_score < 0.25 else ["importe_inusual"],
+        "checked_at":        datetime.utcnow().isoformat(),
     }
 
 
 @tool
-def log_decision(claim_id: str, agent: str, reasoning: str, action: str) -> dict:
-    """
-    Registra la decisión de un agente en MariaDB.
-
-    Args:
-        claim_id:  ID del expediente.
-        agent:     Identificador del agente (ej: 'agent_b_document_validator').
-        reasoning: Razonamiento CoT de la decisión.
-        action:    Acción ejecutada.
-
-    Returns:
-        log_id, stored_at.
-    """
-    logger.info("LOG — Agent %s | Expediente %s | Acción: %s",
-                agent, claim_id, action)
-
-    log_id = -1
-    try:
-        # Import diferido para evitar ciclos
-        from app.db.session import SyncSession
-        from app.db.models  import AgentDecision
-
-        with SyncSession() as session:
-            decision = AgentDecision(
-                claim_id  = claim_id,
-                agent     = agent[:32],   # respetar VARCHAR(32)
-                action    = action[:128], # respetar VARCHAR(128)
-                reasoning = reasoning or "(sin razonamiento)",
-            )
-            session.add(decision)
-            session.commit()
-            log_id = decision.id
-    except Exception as e:
-        logger.error("Failed to persist decision: %s", e)
-
+def approve_payment(claim_id: str, amount: float, iban: str) -> dict:
+    """Simula la emision de una transferencia de pago al cliente."""
+    logger.info("MOCK PAYMENT — Expediente %s: %.2f EUR -> ****%s",
+                claim_id, amount, iban[-4:])
     return {
-        "log_id":    log_id,
-        "claim_id":  claim_id,
-        "agent":     agent,
-        "action":    action,
-        "stored_at": datetime.utcnow().isoformat(),
+        "claim_id":       claim_id,
+        "transaction_id": f"TXN-{claim_id}-{random.randint(10000, 99999)}",
+        "amount":         amount,
+        "iban_last4":     iban[-4:],
+        "status":         "scheduled",
+        "scheduled_date": "2026-06-30",
     }
 
 
-# ── Exporta el conjunt de tools per als agents ────────────────────────────
+@tool
+def send_rejection(claim_id: str, reason: str, client_email: str) -> dict:
+    """Simula el envio de un email de rechazo justificado al cliente."""
+    logger.info("MOCK REJECTION — Expediente %s -> %s", claim_id, client_email)
+    return {
+        "claim_id":       claim_id,
+        "email_id":       f"EMAIL-{claim_id}-REJ",
+        "sent_to":        client_email,
+        "reason_summary": reason[:200],
+        "sent_at":        datetime.utcnow().isoformat(),
+    }
+
+
+@tool
+def request_more_info(claim_id: str, missing_fields: list[str], client_email: str) -> dict:
+    """Solicita informacion adicional al cliente para poder continuar."""
+    logger.info("MOCK INFO REQUEST — Expediente %s: %s", claim_id, missing_fields)
+    return {
+        "claim_id":         claim_id,
+        "request_id":       f"INFO-{claim_id}-{random.randint(100, 999)}",
+        "fields_requested": missing_fields,
+        "sent_to":          client_email,
+        "deadline_days":    10,
+        "sent_at":          datetime.utcnow().isoformat(),
+    }
+
+
+# ── Conjunto exportable ───────────────────────────────────────────────────
 
 AGENT_TOOLS = [
     validate_documents,
     extract_multimodal,
     check_policy,
+    check_fraud,
     approve_payment,
     send_rejection,
     request_more_info,
-    check_fraud,
-    log_decision,
 ]

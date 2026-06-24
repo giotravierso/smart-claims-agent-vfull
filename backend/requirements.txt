@@ -1,34 +1,25 @@
-# ── Core API ─────────────────────────────────
 fastapi==0.111.0
 uvicorn[standard]==0.30.1
-pydantic==2.7.3
-pydantic-settings==2.3.1
+pydantic==2.7.1
 
-# ── LLM + Agent framework ────────────────────
-anthropic==0.29.0
+# LangChain + LangGraph
 langchain==0.2.6
-langchain-anthropic==0.1.19
+langchain-anthropic==0.1.15
 langgraph==0.1.14
-langchain-chroma==0.1.2
 
-# ── RAG ──────────────────────────────────────
-chromadb==0.5.3
-# llama-index s'afegirà quan implementem la ingesta de pòlisses (Entrega 2 S3)
-# llama-index==0.10.50
-# llama-index-embeddings-huggingface==0.2.1
-
-# ── Database ─────────────────────────────────
-sqlalchemy==2.0.31
-pymysql==1.1.1
-alembic==1.13.1
-
-# ── Multimodal / OCR ─────────────────────────
-pillow==10.4.0
-pytesseract==0.3.10
-
-# ── Utils ────────────────────────────────────
-python-dotenv==1.0.1
-httpx==0.27.0
-tenacity==8.4.2
+# Persistencia
+sqlalchemy[asyncio]==2.0.31
 aiomysql==0.2.0
+aiosqlite==0.20.0
+pymysql==1.1.1
+
+# ChromaDB (fase posterior)
+chromadb==0.5.3
+
+# Utilidades
+httpx==0.27.0
+python-multipart==0.0.9
+
+# Testing
 pytest==8.2.0
+pytest-asyncio==0.23.7

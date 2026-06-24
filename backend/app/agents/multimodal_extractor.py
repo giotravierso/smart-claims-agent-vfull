@@ -1,144 +1,122 @@
 """
-Multimodal Extractor — Agente C del sistema Smart-Claims de Seguros Pepín.
+Multimodal Extractor — Agente C del sistema Smart-Claims de Seguros Pepin.
 
-Responsabilidad ÚNICA: extraer datos estructurados de los documentos
-adjuntos (facturas, fotos de daños, actas policiales) usando Claude
-con capacidades de visión (VLM).
+Responsabilidad unica: extraer datos estructurados de los documentos
+adjuntos (facturas, fotos de danos, actas policiales) usando un modelo
+con capacidades de vision (VLM).
 
-Si la confianza de extracción es baja, hace fallback a OCR clásico
-(Tesseract).
+Si la confianza de extraccion es baja, marca el documento para revision
+manual. En producccion haria fallback a OCR clasico (Tesseract).
 
-Referencia en la memoria del TFM: Agente C (multimodal_extractor.py)
+Referencia en la memoria del TFM: Agente C (multimodal_extractor.py).
 """
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
-from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import HumanMessage, SystemMessage
-
-from app.tools.claim_tools import extract_multimodal, log_decision
-
-if TYPE_CHECKING:
-    from app.agents.orchestrator import ClaimState
+from app.agents.reasoning import reason
+from app.tools.claim_tools import extract_multimodal
 
 logger = logging.getLogger(__name__)
 
-
-SYSTEM_PROMPT = """Eres el Agente C (Multimodal Extractor) del sistema Smart-Claims de Seguros Pepín.
-
-Tu responsabilidad es la extracción de datos estructurados de los documentos
-adjuntos: facturas, fotografías de daños y actas policiales.
-
-Proceso:
-1. Por cada documento aportado, llama a extract_multimodal con su tipo.
-2. Si la confianza es < 0.85, marca el resultado para revisión manual.
-3. Agrega todos los resultados en un dict consolidado.
-
-Reglas:
-- Sé exhaustivo: nunca dejes un documento sin procesar.
-- Reporta la confianza de cada extracción.
-- Responde en español.
-"""
+LOW_CONFIDENCE_THRESHOLD = 0.85
 
 
-def _build_llm() -> ChatAnthropic:
-    return ChatAnthropic(
-        model="claude-sonnet-4-6",
-        max_tokens=2048,
-        temperature=0,
-    ).bind_tools([extract_multimodal, log_decision])
-
-
-def multimodal_extractor_node(state: dict) -> dict:
+async def multimodal_extractor_node(state: dict) -> dict:
     """
-    Nodo LangGraph del Agente C.
+    Nodo LangGraph del Agente C — Multimodal Extractor.
 
     Lee del estado: claim_id, documents.
-    Escribe en el estado: extraction_result, status, messages.
+    Escribe en el estado: extraction_result, reasoning_trace, decisions_log.
     """
-    from app.db.models import ClaimStatus
-
     claim_id  = state["claim_id"]
     documents = state.get("documents") or []
 
     logger.info(
-        "[Agent C — MultimodalExtractor] Iniciando — expediente %s | docs: %s",
+        "[Agente C — MultimodalExtractor] Inicio — expediente %s | docs: %s",
         claim_id, documents,
     )
 
-    # Extracción determinista por cada documento aportado
-    extracted: dict = {}
+    # ── Extraccion determinista por cada documento ────────────────────────
+    extracted: dict[str, dict] = {}
     low_confidence_docs: list[str] = []
+    inferred_amount = 0.0
 
     for doc_type in documents:
         result = extract_multimodal.invoke({
             "claim_id": claim_id,
-            "file_url": f"file://{claim_id}/{doc_type}.bin",  # mock URL
+            "file_url": f"mock://{claim_id}/{doc_type}.bin",
             "doc_type": doc_type,
         })
         extracted[doc_type] = result
-        if result.get("confidence", 0) < 0.85:
+
+        if result["confidence"] < LOW_CONFIDENCE_THRESHOLD:
             low_confidence_docs.append(doc_type)
-        logger.info(
-            "[Agent C] %s → confidence=%.3f | data=%s",
-            doc_type, result.get("confidence", 0), result.get("extracted"),
-        )
 
-    # Llamada LLM para consolidar y razonar sobre la extracción
-    user_content = (
-        f"Expediente: {claim_id}\n"
-        f"Documentos procesados: {documents}\n"
-        f"Datos extraídos: {extracted}\n"
-        f"Baja confianza en: {low_confidence_docs}\n\n"
-        f"Resume los hallazgos clave para los siguientes agentes."
-    )
-    llm      = _build_llm()
-    response = llm.invoke([
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=user_content),
-    ])
-
-    # ── Consolida el resultado ────────────────────────────────────────────
-    # Intenta inferir el importe total de las facturas si está disponible
-    inferred_amount = 0.0
-    for doc_data in extracted.values():
-        amount = doc_data.get("extracted", {}).get("amount", 0)
+        # Infiere el importe maximo del expediente si aparece en algun documento
+        amount = result.get("extracted", {}).get("amount")
         if isinstance(amount, (int, float)):
             inferred_amount = max(inferred_amount, float(amount))
+
+    avg_confidence = (
+        round(sum(d["confidence"] for d in extracted.values()) / len(extracted), 3)
+        if extracted else 0.0
+    )
 
     extraction_result = {
         "claim_id":            claim_id,
         "by_document":         extracted,
         "low_confidence_docs": low_confidence_docs,
         "inferred_amount":     inferred_amount,
+        "avg_confidence":      avg_confidence,
     }
 
-    reasoning = (
-        response.content
-        if hasattr(response, "content") and isinstance(response.content, str)
-        else f"Extracción multimodal: {len(extracted)} documentos procesados."
+    # ── Razonamiento (LLM opcional con fallback determinista) ────────────
+    fallback = (
+        f"Agente C: extraidos {len(extracted)} documentos con confianza media "
+        f"{avg_confidence:.2f}. "
+        f"{f'Atencion: baja confianza en {low_confidence_docs}.' if low_confidence_docs else 'Todas las extracciones por encima del umbral.'} "
+        f"Importe inferido: {inferred_amount:.2f} EUR."
     )
-    log_decision.invoke({
-        "claim_id":  claim_id,
-        "agent":     "agent_c_multimodal_extractor",
-        "reasoning": reasoning,
-        "action":    "extracted",
-    })
+
+    reasoning = reason(
+        system=(
+            "Eres el Agente C (Multimodal Extractor) del sistema Smart-Claims "
+            "de Seguros Pepin. Tu rol es extraer datos estructurados de los "
+            "documentos del expediente. Justifica el resultado con detalle "
+            "tecnico. Responde siempre en castellano."
+        ),
+        prompt=(
+            f"Resultado de la extraccion multimodal:\n"
+            f"- Expediente: {claim_id}\n"
+            f"- Documentos procesados: {list(extracted.keys())}\n"
+            f"- Confianza media: {avg_confidence}\n"
+            f"- Documentos con baja confianza: {low_confidence_docs}\n"
+            f"- Importe inferido: {inferred_amount} EUR\n\n"
+            f"Resume los hallazgos clave para los siguientes agentes."
+        ),
+        fallback=fallback,
+    )
 
     logger.info(
-        "[Agent C — MultimodalExtractor] Completado — %d docs | importe inferido: %.2f€",
-        len(extracted), inferred_amount,
+        "[Agente C] Extraccion completada — %d docs | confianza media %.3f | importe inferido %.2f EUR",
+        len(extracted), avg_confidence, inferred_amount,
     )
 
-    # Si no había importe en el state, usar el inferido para los siguientes agentes
-    updates = {
-        "messages":           [response],
-        "extraction_result":  extraction_result,
-        "status":             ClaimStatus.CHECKING_POLICY,
+    update = {
+        "extraction_result": extraction_result,
+        "reasoning_trace":   [reasoning],
+        "decisions_log":     [{
+            "agent":         "agent_c_multimodal_extractor",
+            "action":        "extracted",
+            "reasoning":     reasoning,
+            "confidence":    avg_confidence,
+            "hitl_required": False,
+        }],
     }
-    if state.get("amount_requested", 0) == 0 and inferred_amount > 0:
-        updates["amount_requested"] = inferred_amount
 
-    return updates
+    # Si el state no traia importe declarado, usar el inferido
+    if not state.get("amount_requested") and inferred_amount > 0:
+        update["amount_requested"] = inferred_amount
+
+    return update

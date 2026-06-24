@@ -1,318 +1,304 @@
 """
-Orchestrator — Agente A del sistema Smart-Claims de Seguros Pepín.
+Orchestrator — Agente A del sistema Smart-Claims de Seguros Pepin.
 
-Implementa el patrón Supervisor (Hub-and-Spoke) sobre LangGraph.
-El supervisor es el ÚNICO componente que decide el flujo: lee el estado
+Implementa el patron Supervisor (Hub-and-Spoke) sobre LangGraph. El
+supervisor es el UNICO componente que decide el flujo: lee el estado
 acumulado y enruta al siguiente agente. Los agentes son nodos puros que
 hacen su trabajo y devuelven el control al supervisor.
 
 Mapa de agentes (referencia memoria TFM):
     Agente A → orchestrator.py          (este fichero, supervisor)
-    Agente B → document_validator.py     implementado
-    Agente C → multimodal_extractor.py   skeleton
-    Agente D → coverage_checker.py       skeleton
-    Agente E → claim_resolver.py         skeleton
-    Agente G → fraud_compliance.py       skeleton
+    Agente B → document_validator.py
+    Agente C → multimodal_extractor.py
+    Agente D → coverage_checker.py
+    Agente E → claim_resolver.py
+    Agente G → fraud_compliance.py
 
-Flujo (decidido siempre por el supervisor):
-    triage → document_validator → fraud_compliance →
-    multimodal_extractor → coverage_checker → claim_resolver → [hitl] → END
-
-Cortocircuitos posibles:
-    - document_validator detecta docs faltantes → END
-    - fraud_compliance detecta OFAC/fraude alto → END
-    - coverage_checker detecta no cobertura    → END (vía claim_resolver)
-    - claim_resolver detecta importe > HITL    → hitl → END
+La persistencia de decisiones es centralizada: cada agente acumula su
+contribucion en decisions_log durante la ejecucion del grafo, y al
+finalizar process_claim persiste todo en MariaDB en una unica transaccion.
+Si la BD no esta disponible, la persistencia falla silenciosamente y el
+flujo devuelve igualmente el resultado (resiliencia para la demo).
 """
 from __future__ import annotations
 
 import logging
-from typing import Annotated, TypedDict
 
-from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langgraph.graph import END, StateGraph
-from langgraph.graph.message import add_messages
 
-from app.db.models import ClaimStatus
+from app.agents.claim_resolver       import claim_resolver_node
+from app.agents.coverage_checker     import coverage_checker_node
+from app.agents.document_validator   import document_validator_node
+from app.agents.fraud_compliance     import fraud_compliance_node
+from app.agents.multimodal_extractor import multimodal_extractor_node
+from app.agents.reasoning            import reason
+from app.agents.state                import ClaimState
+from app.db.models                   import ClaimStatus
+from app.db.repository               import log_agent_decision, save_claim
 
 logger = logging.getLogger(__name__)
 
 
-# ── State ──────────────────────────────────────────────────────────────────
+# ── Nodo de triaje (entrada al grafo) ─────────────────────────────────────
 
-class ClaimState(TypedDict):
-    # ── Identidad ─────────────────────────────────
-    claim_id:           str
-    client_id:          str
-    client_email:       str
-
-    # ── Conversación / CoT ────────────────────────
-    messages:           Annotated[list[BaseMessage], add_messages]
-
-    # ── Datos del expediente ──────────────────────
-    claim_type:         str
-    amount_requested:   float
-    documents:          list[str]
-
-    # ── Resultados por agente ─────────────────────
-    validation_result:  dict | None      # Agente B
-    fraud_result:       dict | None      # Agente G
-    extraction_result:  dict | None      # Agente C
-    coverage_result:    dict | None      # Agente D
-    resolution:         dict | None      # Agente E
-
-    # ── Control de flujo ──────────────────────────
-    status:             ClaimStatus
-    hitl_required:      bool
-    terminate:          bool
-    termination_reason: str | None
-
-
-# ── LLM para el triage inicial ────────────────────────────────────────────
-
-def _build_triage_llm() -> ChatAnthropic:
-    """LLM para parsear el correo entrante. No usa tools."""
-    return ChatAnthropic(
-        model="claude-sonnet-4-6",
-        max_tokens=1024,
-        temperature=0,
-    )
-
-
-# ── Nodos del Agente A ────────────────────────────────────────────────────
-
-def triage_node(state: ClaimState) -> dict:
+async def triage_node(state: dict) -> dict:
     """
-    Nodo de entrada. Parsea la reclamación recibida y enriquece el estado
-    con los campos estructurados (tipo, importe, documentos aportados).
+    Agente A — triaje inicial del expediente.
 
-    No decide el siguiente agente — eso es responsabilidad del supervisor.
-
-    Referencia en la memoria del TFM: Agente A (orchestrator.py — triage)
+    No decide enrutamiento (de eso se ocupa el supervisor); su rol es
+    enriquecer el estado con el razonamiento de bienvenida y dejar el
+    expediente listo para el primer agente especialista.
     """
     claim_id = state["claim_id"]
-    logger.info("[Agent A — Triage] Iniciando triaje — expediente %s", claim_id)
+    logger.info("[Agente A — Orchestrator] Triaje iniciado — expediente %s", claim_id)
 
-    # Si el state ya tiene los campos rellenos (porque la API REST los pasó
-    # estructurados), no hace falta llamar al LLM. Solo si solo hay texto.
-    if state.get("claim_type") and state.get("documents") is not None:
-        logger.info("[Agent A — Triage] Estado ya estructurado — saltando LLM")
-        return {"status": ClaimStatus.VALIDATING}
-
-    # Parseo LLM del texto inicial
-    llm = _build_triage_llm()
-    system = (
-        "Eres el módulo de triaje del Agente A del sistema Smart-Claims. "
-        "Tu única tarea es extraer información estructurada de la reclamación "
-        "entrante. Responde SIEMPRE en formato JSON con los campos: "
-        "claim_type (danys_propis|responsabilitat|robatori|danys_mecanics|default), "
-        "amount_requested (float), "
-        "documents (lista de strings: foto_danys, factura, acta_policial, etc.), "
-        "client_email (string). "
-        "Si no puedes determinar un campo, usa null."
+    fallback = (
+        f"Agente A: expediente {claim_id} de tipo '{state.get('claim_type')}' "
+        f"por importe {state.get('amount_requested') or 0} EUR. Se inicia el "
+        f"flujo de procesamiento con cribado antifraude como filtro de entrada."
     )
-    response = llm.invoke([
-        SystemMessage(content=system),
-        *state["messages"],
-    ])
 
-    logger.info("[Agent A — Triage] Triaje completado — expediente %s", claim_id)
+    reasoning = reason(
+        system=(
+            "Eres el Agente A (Orchestrator) del sistema Smart-Claims de "
+            "Seguros Pepin. Tu rol es analizar el expediente entrante y "
+            "razonar el triaje. Responde siempre en castellano."
+        ),
+        prompt=(
+            f"Reclamacion recibida:\n"
+            f"- ID: {state.get('claim_id')}\n"
+            f"- Cliente: {state.get('client_id')}\n"
+            f"- Tipo: {state.get('claim_type')}\n"
+            f"- Importe: {state.get('amount_requested')}\n"
+            f"- Canal: {state.get('channel')}\n"
+            f"- Documentos aportados: {state.get('documents')}\n\n"
+            f"Razona el triaje paso a paso."
+        ),
+        fallback=fallback,
+    )
 
-    # Por ahora, el parseo del JSON queda como TODO; el supervisor
-    # funciona con los campos que ya vienen del state inicial.
     return {
-        "messages": [response],
-        "status":   ClaimStatus.VALIDATING,
+        "status":          ClaimStatus.OPEN.value,
+        "reasoning_trace": [reasoning],
+        "decisions_log":   [{
+            "agent":         "agent_a_orchestrator",
+            "action":        "triage",
+            "reasoning":     reasoning,
+            "confidence":    None,
+            "hitl_required": False,
+        }],
     }
 
 
-def hitl_node(state: ClaimState) -> dict:
+# ── SUPERVISOR — el cerebro del enrutamiento ──────────────────────────────
+
+def supervisor_router(state: dict) -> str:
     """
-    Human-in-the-Loop: pausa el flujo para revisión humana.
-    Lo activa el supervisor cuando claim_resolver marca hitl_required=True.
+    Nucleo del patron Hub-and-Spoke.
+
+    Lee el estado acumulado y decide DETERMINISTICAMENTE el proximo agente.
+    Ningun agente tiene su propio router: todos retornan aqui.
+
+    Orden de evaluacion:
+    1.  Flujo terminado          → END
+    2.  Cribado fraude pendiente → fraud_compliance (Agente G)
+    3.  Cliente flagged          → END (caso bloqueado)
+    4.  Validacion pendiente     → document_validator (Agente B)
+    5.  Documentos incompletos   → END (cliente notificado)
+    6.  Extraccion pendiente     → multimodal_extractor (Agente C)
+    7.  Cobertura pendiente      → coverage_checker (Agente D)
+    8.  Resolucion pendiente     → claim_resolver (Agente E)
+    9.  Todo completo            → END
     """
-    logger.info("[Agent A — HITL] Activado — expediente %s | razón: %s",
-                state["claim_id"],
-                state.get("termination_reason") or "importe sobre umbral")
-    return {
-        "status":    ClaimStatus.PENDING_REVIEW,
-        "terminate": True,
-    }
+    claim_id = state.get("claim_id", "?")
 
-
-# ── SUPERVISOR — el cerebro del enrutamiento ─────────────────────────────
-
-def supervisor_router(state: ClaimState) -> str:
-    """
-    Núcleo del patrón Hub-and-Spoke.
-
-    Lee el estado acumulado y decide DETERMINÍSTICAMENTE el próximo agente.
-    Ningún agente tiene su propio router: todos retornan aquí.
-
-    Orden de evaluación:
-    1. ¿Flujo terminado?              → END
-    2. ¿HITL activado?                → hitl
-    3. ¿Falta validación documental?  → document_validator (B)
-    4. ¿Docs incompletos?             → END (cliente notificado)
-    5. ¿Falta verificación fraude?    → fraud_compliance (G)
-    6. ¿Cliente flagged?              → END (bloqueado)
-    7. ¿Falta extracción VLM?         → multimodal_extractor (C)
-    8. ¿Falta verificación cobertura? → coverage_checker (D)
-    9. ¿Falta resolución?             → claim_resolver (E)
-    10. Todo completo                 → END
-    """
-    claim_id = state["claim_id"]
-
-    # 1. Flujo terminado explícitamente
+    # 1. Terminacion explicita (rechazo, pago aprobado, HITL activado)
     if state.get("terminate"):
-        reason = state.get("termination_reason", "completado")
-        logger.info("[Supervisor] %s → END (%s)", claim_id, reason)
+        reason_term = state.get("termination_reason", "completado")
+        logger.info("[Supervisor] %s → END (%s)", claim_id, reason_term)
         return END
 
-    # 2. HITL pendiente
-    if state.get("hitl_required") and state.get("resolution") is None:
-        logger.info("[Supervisor] %s → hitl", claim_id)
-        return "hitl"
-
-    # 3-4. Validación documental
-    if state.get("validation_result") is None:
-        logger.info("[Supervisor] %s → document_validator", claim_id)
-        return "document_validator"
-
-    if not state["validation_result"].get("is_valid"):
-        logger.info("[Supervisor] %s → END (docs incompletos)", claim_id)
-        return END
-
-    # 5-6. Fraude / compliance
+    # 2-3. Cribado de fraude (filtro de entrada)
     if state.get("fraud_result") is None:
         logger.info("[Supervisor] %s → fraud_compliance", claim_id)
         return "fraud_compliance"
 
     if state["fraud_result"].get("is_flagged"):
-        logger.info("[Supervisor] %s → END (caso bloqueado por fraude/OFAC)", claim_id)
+        logger.info("[Supervisor] %s → END (bloqueado por fraude/OFAC)", claim_id)
         return END
 
-    # 7. Extracción multimodal
+    # 4-5. Validacion documental
+    if state.get("validation_result") is None:
+        logger.info("[Supervisor] %s → document_validator", claim_id)
+        return "document_validator"
+
+    if not state["validation_result"].get("is_valid"):
+        logger.info("[Supervisor] %s → END (documentacion incompleta)", claim_id)
+        return END
+
+    # 6. Extraccion multimodal
     if state.get("extraction_result") is None:
         logger.info("[Supervisor] %s → multimodal_extractor", claim_id)
         return "multimodal_extractor"
 
-    # 8. Verificación de cobertura
+    # 7. Verificacion de cobertura
     if state.get("coverage_result") is None:
         logger.info("[Supervisor] %s → coverage_checker", claim_id)
         return "coverage_checker"
 
-    # 9. Resolución final
+    # 8. Resolucion final
     if state.get("resolution") is None:
         logger.info("[Supervisor] %s → claim_resolver", claim_id)
         return "claim_resolver"
 
-    # 10. Nada pendiente
+    # 9. Nada pendiente
     logger.info("[Supervisor] %s → END (flujo completo)", claim_id)
     return END
 
 
-# ── Construcción del grafo ─────────────────────────────────────────────────
+# ── Construccion del grafo ────────────────────────────────────────────────
 
 def build_orchestrator():
-    from app.agents.document_validator   import document_validator_node
-    from app.agents.fraud_compliance     import fraud_compliance_node
-    from app.agents.multimodal_extractor import multimodal_extractor_node
-    from app.agents.coverage_checker     import coverage_checker_node
-    from app.agents.claim_resolver       import claim_resolver_node
-
     graph = StateGraph(ClaimState)
 
-    # ── Nodos ──────────────────────────────────────────────────────────────
+    # Nodos: 1 hub + 5 agentes especialistas
     graph.add_node("triage",               triage_node)
-    graph.add_node("hitl",                 hitl_node)
-    graph.add_node("document_validator",   document_validator_node)
     graph.add_node("fraud_compliance",     fraud_compliance_node)
+    graph.add_node("document_validator",   document_validator_node)
     graph.add_node("multimodal_extractor", multimodal_extractor_node)
     graph.add_node("coverage_checker",     coverage_checker_node)
     graph.add_node("claim_resolver",       claim_resolver_node)
 
-    # ── Punto de entrada ──────────────────────────────────────────────────
+    # Entrada
     graph.set_entry_point("triage")
 
-    # ── Tras triage → supervisor decide ────────────────────────────────────
-    graph.add_conditional_edges("triage", supervisor_router, {
-        "document_validator":   "document_validator",
-        "fraud_compliance":     "fraud_compliance",
-        "multimodal_extractor": "multimodal_extractor",
-        "coverage_checker":     "coverage_checker",
-        "claim_resolver":       "claim_resolver",
-        "hitl":                 "hitl",
-        END:                    END,
-    })
-
-    # ── Cada agente vuelve al supervisor ──────────────────────────────────
+    # Tras triaje: el supervisor decide
     spoke_destinations = {
-        "document_validator":   "document_validator",
         "fraud_compliance":     "fraud_compliance",
+        "document_validator":   "document_validator",
         "multimodal_extractor": "multimodal_extractor",
         "coverage_checker":     "coverage_checker",
         "claim_resolver":       "claim_resolver",
-        "hitl":                 "hitl",
         END:                    END,
     }
-    for agent in ["document_validator", "fraud_compliance",
-                  "multimodal_extractor", "coverage_checker",
-                  "claim_resolver"]:
-        graph.add_conditional_edges(agent, supervisor_router, spoke_destinations)
+    graph.add_conditional_edges("triage", supervisor_router, spoke_destinations)
 
-    # ── hitl es terminal ──────────────────────────────────────────────────
-    graph.add_edge("hitl", END)
+    # Cada agente vuelve al supervisor (Hub-and-Spoke)
+    for agent in ["fraud_compliance", "document_validator", "multimodal_extractor",
+                  "coverage_checker", "claim_resolver"]:
+        graph.add_conditional_edges(agent, supervisor_router, spoke_destinations)
 
     return graph.compile()
 
 
-# ── API pública ────────────────────────────────────────────────────────────
-
 orchestrator = build_orchestrator()
 
 
+# ── Normalizacion del estado final ────────────────────────────────────────
+
+def _normalize_final_state(final: dict) -> dict:
+    """
+    Garantiza que el estado final tiene un `status` y un `decision`
+    coherentes con el resultado del flujo.
+
+    Hay tres casos en los que el flujo se corta sin que un agente actualice
+    explicitamente el status (que se quedaria en "open" tras el triaje):
+
+    1. El cribado de fraude marca el caso como flagged.
+    2. La validacion documental detecta documentos incompletos.
+    3. Cualquier otra ruta que termine en END sin pasar por claim_resolver.
+
+    Esta funcion deduce el status correcto a partir de los resultados
+    parciales acumulados en el estado.
+    """
+    current_status = final.get("status")
+
+    # Si el resolver ya ha establecido un status final, no lo tocamos
+    if current_status not in (None, "", ClaimStatus.OPEN.value):
+        return final
+
+    # Caso 1: caso bloqueado por fraude
+    if final.get("fraud_result", {}).get("is_flagged"):
+        final["status"]             = ClaimStatus.REJECTED.value
+        final["decision"]           = "RECHAZO_FRAUDE"
+        final["termination_reason"] = final.get("termination_reason") or "caso bloqueado por fraude/OFAC"
+        return final
+
+    # Caso 2: documentacion incompleta
+    validation = final.get("validation_result") or {}
+    if validation and not validation.get("is_valid"):
+        final["status"]             = ClaimStatus.VALIDATING.value
+        final["decision"]           = "INFO_REQUERIDA"
+        final["termination_reason"] = (
+            final.get("termination_reason")
+            or f"documentacion incompleta: faltan {', '.join(validation.get('missing_docs', []))}"
+        )
+        return final
+
+    # Caso 3: el resolver ya habra escrito su status; si no, queda en open
+    return final
+
+
+# ── API publica ───────────────────────────────────────────────────────────
+
 async def process_claim(
     claim_id:         str,
-    claim_text:       str,
-    client_id:        str        = "UNKNOWN",
-    client_email:     str        = "cliente@example.com",
-    claim_type:       str        = "default",
-    amount_requested: float      = 0.0,
+    client_id:        str,
+    claim_type:       str,
+    amount_requested: float | None    = None,
+    channel:          str             = "email",
     documents:        list[str] | None = None,
-) -> ClaimState:
+    client_email:     str             = "cliente@example.com",
+) -> dict:
     """
-    Punto de entrada público del sistema.
+    Procesa un expediente a traves del grafo de agentes y persiste las
+    decisiones en MariaDB.
 
-    Args:
-        claim_id:         Identificador único del expediente.
-        claim_text:       Texto bruto de la reclamación (correo, formulario).
-        client_id:        ID del cliente para cribado OFAC.
-        client_email:     Email del cliente para notificaciones.
-        claim_type:       Tipo de siniestro si ya viene clasificado.
-        amount_requested: Importe reclamado si ya está estructurado.
-        documents:        Lista de documentos aportados.
-
-    Returns:
-        Estado final del expediente con la decisión y la traza CoT.
+    La persistencia esta envuelta en try/except: si no hay base de datos
+    disponible (p. ej. la CLI de demo sin MariaDB), el flujo devuelve
+    igualmente su resultado. Es una propiedad clave de resiliencia para
+    la demostracion ante tribunal.
     """
-    initial_state: ClaimState = {
-        "claim_id":           claim_id,
-        "client_id":          client_id,
-        "client_email":       client_email,
-        "messages":           [HumanMessage(content=claim_text)],
-        "claim_type":         claim_type,
-        "amount_requested":   amount_requested,
-        "documents":          documents or [],
-        "validation_result":  None,
-        "fraud_result":       None,
-        "extraction_result":  None,
-        "coverage_result":    None,
-        "resolution":         None,
-        "status":             ClaimStatus.OPEN,
-        "hitl_required":      False,
-        "terminate":          False,
-        "termination_reason": None,
+    initial: ClaimState = {
+        "claim_id":         claim_id,
+        "client_id":        client_id,
+        "client_email":     client_email,
+        "claim_type":       claim_type,
+        "amount_requested": amount_requested,
+        "channel":          channel,
+        "documents":        documents or [],
+        "reasoning_trace":  [],
+        "decisions_log":    [],
     }
-    return await orchestrator.ainvoke(initial_state)
+
+    final = await orchestrator.ainvoke(initial)
+
+    # Normaliza status y decision cuando el flujo se ha cortado sin pasar
+    # por el claim_resolver (fraude detectado, documentos incompletos, etc.)
+    final = _normalize_final_state(final)
+
+    # Persistencia best-effort: si falla, la demo no se rompe
+    try:
+        await save_claim(
+            claim_id         = claim_id,
+            client_id        = client_id,
+            claim_type       = claim_type,
+            channel          = channel,
+            amount_requested = amount_requested,
+            amount_approved  = (final.get("resolution") or {}).get("amount_paid"),
+            status           = ClaimStatus(final.get("status", ClaimStatus.OPEN.value)),
+        )
+        for d in final.get("decisions_log", []):
+            await log_agent_decision(
+                claim_id      = claim_id,
+                agent         = d["agent"],
+                action        = d["action"],
+                reasoning     = d["reasoning"],
+                confidence    = d.get("confidence"),
+                hitl_required = d.get("hitl_required", False),
+            )
+    except Exception as exc:
+        logger.warning("No se han podido persistir las decisiones de %s: %s",
+                       claim_id, exc)
+
+    return final

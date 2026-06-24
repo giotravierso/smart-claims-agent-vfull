@@ -24,7 +24,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 
-random.seed(7)  # reproducibilidad
+random.seed(7)(7)  # reproducibilidad
 
 OUTPUT_DIR = Path("/app/data/synthetic")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)

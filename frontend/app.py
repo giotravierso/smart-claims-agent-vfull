@@ -1,15 +1,14 @@
 """
 Smart-Claims Agent — Dashboard Streamlit.
 
-Interfaz de demostracion del sistema agentico.
-Permite enviar reclamaciones de prueba y visualizar en tiempo real
-el Chain of Thought completo de los agentes que las procesan.
+Interfaz de demostracion del sistema agentico. Permite enviar
+reclamaciones de prueba y visualizar en tiempo real el Chain of Thought
+completo de los agentes que las procesan.
 """
 from __future__ import annotations
 
 import os
 import time
-from datetime import datetime
 
 import httpx
 import pandas as pd
@@ -18,6 +17,7 @@ import streamlit as st
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://backend:8000")
 API_BASE    = f"{BACKEND_URL}/api/v1/claims"
+
 
 AGENT_LABELS = {
     "agent_a_orchestrator":         "Agente A — Orchestrator",
@@ -28,6 +28,7 @@ AGENT_LABELS = {
     "agent_g_fraud_compliance":     "Agente G — Fraud Compliance",
 }
 
+
 CLAIM_TYPES = {
     "danys_propis":    "Danos propios",
     "responsabilitat": "Responsabilidad civil",
@@ -35,6 +36,7 @@ CLAIM_TYPES = {
     "danys_mecanics":  "Danos mecanicos",
     "default":         "Default",
 }
+
 
 REQUIRED_DOCS_BY_TYPE = {
     "danys_propis":    ["foto_danys", "factura", "denuncia_companyia"],
@@ -48,18 +50,17 @@ REQUIRED_DOCS_BY_TYPE = {
 # ── Configuracion de pagina ───────────────────────────────────────────────
 
 st.set_page_config(
-    page_title = "Smart-Claims Agent",
-    layout     = "wide",
+    page_title            = "Smart-Claims Agent",
+    layout                = "wide",
     initial_sidebar_state = "expanded",
 )
 
-
-# ── Estilos ───────────────────────────────────────────────────────────────
 
 st.markdown("""
 <style>
     .stApp { background-color: #FAFAF7; }
     h1, h2, h3 { color: #1A1A1A; font-weight: 500; }
+
     .decision-card {
         padding: 16px 20px;
         border-radius: 8px;
@@ -79,25 +80,13 @@ st.markdown("""
         font-size: 14px;
         color: #1A1A1A;
         line-height: 1.6;
+        white-space: pre-wrap;
     }
     .decision-card .meta {
         font-size: 11px;
         color: #9A9A95;
         margin-top: 10px;
     }
-    .status-pill {
-        display: inline-block;
-        padding: 4px 12px;
-        border-radius: 12px;
-        font-size: 12px;
-        font-weight: 500;
-    }
-    .status-resolved      { background: #E8F5E9; color: #2E7D32; }
-    .status-rejected      { background: #FFEBEE; color: #C62828; }
-    .status-pending       { background: #FFF8E1; color: #F57F17; }
-    .status-validating    { background: #E3F2FD; color: #1565C0; }
-    .status-extracting    { background: #F3E5F5; color: #6A1B9A; }
-    .status-default       { background: #F5F5F5; color: #424242; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -105,15 +94,13 @@ st.markdown("""
 # ── Funciones API ─────────────────────────────────────────────────────────
 
 def api_create_claim(payload: dict) -> dict:
-    """POST /api/v1/claims/"""
-    with httpx.Client(timeout=120.0) as client:
+    with httpx.Client(timeout=180.0) as client:
         response = client.post(f"{API_BASE}/", json=payload)
         response.raise_for_status()
         return response.json()
 
 
 def api_get_trace(claim_id: str) -> dict:
-    """GET /api/v1/claims/{id}/trace"""
     with httpx.Client(timeout=10.0) as client:
         response = client.get(f"{API_BASE}/{claim_id}/trace")
         response.raise_for_status()
@@ -121,7 +108,6 @@ def api_get_trace(claim_id: str) -> dict:
 
 
 def api_list_claims() -> list[dict]:
-    """GET /api/v1/claims/"""
     with httpx.Client(timeout=10.0) as client:
         response = client.get(f"{API_BASE}/")
         response.raise_for_status()
@@ -130,24 +116,11 @@ def api_list_claims() -> list[dict]:
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
-def status_pill(status: str) -> str:
-    """Genera un pill HTML para el estado."""
-    css_class = {
-        "resolved":       "status-resolved",
-        "rejected":       "status-rejected",
-        "pending_review": "status-pending",
-        "validating":     "status-validating",
-        "extracting":     "status-extracting",
-    }.get(status, "status-default")
-    return f'<span class="status-pill {css_class}">{status}</span>'
-
-
 def render_decision_card(decision: dict) -> None:
-    """Renderiza una decision de un agente como tarjeta."""
     agent_label = AGENT_LABELS.get(decision["agent"], decision["agent"])
     action      = decision["action"]
     reasoning   = decision["reasoning"]
-    created_at  = decision["created_at"]
+    created_at  = decision.get("created_at", "")
 
     st.markdown(f"""
     <div class="decision-card">
@@ -169,7 +142,7 @@ with st.sidebar.form("claim_form"):
 
     claim_type_key = st.selectbox(
         "Tipo de siniestro",
-        options = list(CLAIM_TYPES.keys()),
+        options     = list(CLAIM_TYPES.keys()),
         format_func = lambda k: CLAIM_TYPES[k],
     )
 
@@ -201,7 +174,7 @@ with st.sidebar.form("claim_form"):
 # ── Cuerpo principal ──────────────────────────────────────────────────────
 
 st.title("Smart-Claims Agent")
-st.caption("Sistema agentico de procesamiento de reclamaciones — TFM OBS Business School")
+st.caption("Sistema agentico para la gestion de reclamaciones — TFM OBS Business School")
 
 tab_demo, tab_history = st.tabs(["Demostracion en vivo", "Historial"])
 
@@ -246,7 +219,7 @@ with tab_demo:
         col3.metric(
             "Importe pagado",
             f"{result.get('amount_paid') or 0:.2f} EUR",
-            delta = f"de {result['amount_requested']:.2f} EUR solicitados",
+            delta = f"de {result.get('amount_requested') or 0:.2f} EUR solicitados",
         )
         col4.metric("Tiempo proceso", f"{elapsed:.1f} s")
 
@@ -259,7 +232,7 @@ with tab_demo:
         elif result["status"] == "rejected":
             st.error(f"Reclamacion rechazada — {result.get('termination_reason')}")
         elif result["status"] == "validating":
-            st.info(f"Documentacion incompleta — cliente notificado")
+            st.info("Documentacion incompleta — cliente notificado")
 
         st.subheader("Chain of Thought de los agentes")
         st.caption("Cada tarjeta muestra el razonamiento de un agente del sistema")
@@ -282,25 +255,25 @@ with tab_demo:
 
         with st.expander("Escenarios de prueba sugeridos"):
             st.markdown("""
-            **Escenario 1 — Pago automatico**
-            Tipo: Danos propios &middot; Importe: 2500 EUR &middot; Todos los documentos aportados.
-            Resultado esperado: pago automatico de 2200 EUR (tras franquicia).
+**Escenario 1 — Pago automatico**
+Tipo: Danos propios &middot; Importe: 2500 EUR &middot; Todos los documentos aportados.
+Resultado esperado: pago automatico tras franquicia.
 
-            **Escenario 2 — Revision humana (HITL)**
-            Tipo: Responsabilidad &middot; Importe: 9500 EUR &middot; Todos los documentos aportados.
-            Resultado esperado: HITL activado por superar el umbral de 5000 EUR.
+**Escenario 2 — Revision humana (HITL)**
+Tipo: Responsabilidad &middot; Importe: 9500 EUR &middot; Todos los documentos aportados.
+Resultado esperado: HITL activado por superar el umbral de 5000 EUR.
 
-            **Escenario 3 — Documentacion incompleta**
-            Tipo: Danos propios &middot; Importe: 3000 EUR &middot; Solo foto_danys.
-            Resultado esperado: solicitud de documentacion adicional al cliente.
+**Escenario 3 — Documentacion incompleta**
+Tipo: Danos propios &middot; Importe: 3000 EUR &middot; Solo foto_danys.
+Resultado esperado: solicitud de documentacion adicional al cliente.
 
-            **Escenario 4 — No cobertura**
-            Tipo: Danos mecanicos &middot; Importe: 1500 EUR &middot; Documentos completos.
-            Resultado esperado: rechazo justificado (este tipo no esta cubierto).
+**Escenario 4 — No cobertura**
+Tipo: Danos mecanicos &middot; Importe: 1500 EUR &middot; Documentos completos.
+Resultado esperado: rechazo justificado.
             """)
 
 
-# ── Tab 2 — Historial ───────────────────────────────────────────────────
+# ── Tab 2 — Historial ─────────────────────────────────────────────────────
 
 with tab_history:
     st.subheader("Historial de reclamaciones procesadas")
@@ -315,12 +288,15 @@ with tab_history:
         st.info("Aun no se ha procesado ninguna reclamacion.")
     else:
         df = pd.DataFrame(claims)
-        df["created_at"] = pd.to_datetime(df["created_at"])
-        df = df.sort_values("created_at", ascending=False)
+        if "created_at" in df.columns:
+            df["created_at"] = pd.to_datetime(df["created_at"], errors="coerce")
+            df = df.sort_values("created_at", ascending=False)
 
         df_display = df[[
-            "id", "client_id", "claim_type", "status",
-            "amount_requested", "amount_approved", "created_at",
+            c for c in [
+                "id", "client_id", "claim_type", "status",
+                "amount_requested", "amount_approved", "created_at",
+            ] if c in df.columns
         ]].rename(columns={
             "id":               "Expediente",
             "client_id":        "Cliente",
@@ -334,12 +310,13 @@ with tab_history:
         st.dataframe(df_display, use_container_width=True, hide_index=True)
 
         st.subheader("Distribucion por estado")
-        status_counts = df["status"].value_counts()
-        st.bar_chart(status_counts)
+        if "status" in df.columns:
+            status_counts = df["status"].value_counts()
+            st.bar_chart(status_counts)
 
         selected = st.selectbox(
             "Ver traza CoT de un expediente",
-            options = [""] + df["id"].tolist(),
+            options = [""] + df["id"].tolist() if "id" in df.columns else [""],
         )
 
         if selected:
