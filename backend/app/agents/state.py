@@ -23,6 +23,7 @@ class ClaimState(TypedDict, total=False):
     # ── Identidad del expediente ──────────────────────────────────────────
     claim_id:         str
     client_id:        str
+    client_name:      str   # nombre del asegurado (cribado OFAC del Agente G)
     client_email:     str
 
     # ── Datos de entrada ──────────────────────────────────────────────────
@@ -30,6 +31,9 @@ class ClaimState(TypedDict, total=False):
     amount_requested: float
     channel:          str
     documents:        list[str]
+    # Documentos reales subidos para análisis multimodal (Agente C, Claude Vision).
+    # Cada elemento: {"filename", "media_type", "data" (bytes), "doc_type"}.
+    uploaded_files:   list[dict]
 
     # ── Conversación / ReAct ──────────────────────────────────────────────
     messages: Annotated[list[BaseMessage], add_messages]

@@ -249,6 +249,8 @@ async def process_claim(
     channel:          str             = "email",
     documents:        list[str] | None = None,
     client_email:     str             = "cliente@example.com",
+    client_name:      str | None      = None,
+    uploaded_files:   list[dict] | None = None,
 ) -> dict:
     """
     Procesa un expediente a traves del grafo de agentes y persiste las
@@ -262,11 +264,13 @@ async def process_claim(
     initial: ClaimState = {
         "claim_id":         claim_id,
         "client_id":        client_id,
+        "client_name":      client_name or client_id,
         "client_email":     client_email,
         "claim_type":       claim_type,
         "amount_requested": amount_requested,
         "channel":          channel,
         "documents":        documents or [],
+        "uploaded_files":   uploaded_files or [],
         "reasoning_trace":  [],
         "decisions_log":    [],
     }

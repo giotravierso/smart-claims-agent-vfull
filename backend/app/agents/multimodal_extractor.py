@@ -12,9 +12,11 @@ Referencia en la memoria del TFM: Agente C (multimodal_extractor.py).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from app.agents.reasoning import reason
+from app.agents.vision import analyze_document
 from app.tools.claim_tools import extract_multimodal
 
 logger = logging.getLogger(__name__)
@@ -26,45 +28,70 @@ async def multimodal_extractor_node(state: dict) -> dict:
     """
     Nodo LangGraph del Agente C — Multimodal Extractor.
 
-    Lee del estado: claim_id, documents.
+    Lee del estado: claim_id, documents, uploaded_files (opcional).
     Escribe en el estado: extraction_result, reasoning_trace, decisions_log.
+
+    Si el expediente trae documentos REALES subidos (`uploaded_files`), el agente
+    los analiza con Claude Vision (extracción real). Si no, usa la mock tool
+    `extract_multimodal` sobre los tipos de documento declarados.
     """
     claim_id  = state["claim_id"]
     documents = state.get("documents") or []
+    uploaded  = state.get("uploaded_files") or []
 
     logger.info(
-        "[Agente C — MultimodalExtractor] Inicio — expediente %s | docs: %s",
-        claim_id, documents,
+        "[Agente C — MultimodalExtractor] Inicio — expediente %s | docs: %s | archivos: %d",
+        claim_id, documents, len(uploaded),
     )
 
-    # ── Extraccion determinista por cada documento ────────────────────────
     extracted: dict[str, dict] = {}
     low_confidence_docs: list[str] = []
     inferred_amount = 0.0
+    source = "mock"
 
-    for doc_type in documents:
-        result = extract_multimodal.invoke({
-            "claim_id": claim_id,
-            "file_url": f"mock://{claim_id}/{doc_type}.bin",
-            "doc_type": doc_type,
-        })
-        extracted[doc_type] = result
-
-        if result["confidence"] < LOW_CONFIDENCE_THRESHOLD:
-            low_confidence_docs.append(doc_type)
-
-        # Infiere el importe maximo del expediente si aparece en algun documento
-        amount = result.get("extracted", {}).get("amount")
-        if isinstance(amount, (int, float)):
-            inferred_amount = max(inferred_amount, float(amount))
+    if uploaded:
+        # ── Extracción REAL con Claude Vision ─────────────────────────────
+        source = "claude_vision"
+        for f in uploaded:
+            name = f.get("filename") or "documento"
+            vision = await asyncio.to_thread(
+                analyze_document, f.get("data", b""),
+                f.get("media_type", "image/png"), name,
+            )
+            if vision is None:  # sin clave o fallo → registro neutro, no rompe el flujo
+                vision = {"doc_type": "desconocido", "amount": None,
+                          "summary": "Extracción no disponible (sin clave LLM o error).",
+                          "confidence": 0.0, "unavailable": True}
+            extracted[name] = vision
+            conf = float(vision.get("confidence") or 0.0)
+            if conf < LOW_CONFIDENCE_THRESHOLD:
+                low_confidence_docs.append(name)
+            amount = vision.get("amount")
+            if isinstance(amount, (int, float)):
+                inferred_amount = max(inferred_amount, float(amount))
+    else:
+        # ── Extracción simulada por tipo de documento (mock tool) ─────────
+        for doc_type in documents:
+            result = extract_multimodal.invoke({
+                "claim_id": claim_id,
+                "file_url": f"mock://{claim_id}/{doc_type}.bin",
+                "doc_type": doc_type,
+            })
+            extracted[doc_type] = result
+            if result["confidence"] < LOW_CONFIDENCE_THRESHOLD:
+                low_confidence_docs.append(doc_type)
+            amount = result.get("extracted", {}).get("amount")
+            if isinstance(amount, (int, float)):
+                inferred_amount = max(inferred_amount, float(amount))
 
     avg_confidence = (
-        round(sum(d["confidence"] for d in extracted.values()) / len(extracted), 3)
+        round(sum(float(d.get("confidence") or 0.0) for d in extracted.values()) / len(extracted), 3)
         if extracted else 0.0
     )
 
     extraction_result = {
         "claim_id":            claim_id,
+        "source":              source,
         "by_document":         extracted,
         "low_confidence_docs": low_confidence_docs,
         "inferred_amount":     inferred_amount,

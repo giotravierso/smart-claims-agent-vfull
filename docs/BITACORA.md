@@ -135,3 +135,29 @@ protege `.env` y `.streamlit/secrets.toml`.
 La app arranca sin errores en modo headless y el camino in-process produce la decisión
 correcta con CoT de Claude (caso de prueba: `danys_propis`, 2.500 € → `resolved` / `PAGO`).
 Guía de despliegue paso a paso en `docs/DEPLOY-STREAMLIT.md`.
+
+## Fase 8 — Extracción multimodal REAL (Agente C con Claude Vision) (junio 2026)
+
+**Hito 8.1 — De mock a VLM real.**
+Hasta ahora el Agente C (extracción multimodal) era un mock: no leía ningún documento real.
+Se implementa la extracción **real** con **Claude Vision** (`claude-sonnet-4-6`): el usuario sube
+documentos (factura, foto de daños, acta, PDF…) y Claude extrae datos estructurados
+(tipo, importe, fecha, emisor, resumen, confianza). Nuevo módulo `backend/app/agents/vision.py`;
+el nodo `multimodal_extractor` usa Claude Vision si hay archivos subidos y *fallback* al mock si no
+hay archivos o no hay clave. **Justificación:** Claude NO es un sistema de Seguros Pepín, es el LLM
+del proyecto, así que esta extracción real **no viola** la regla de "sin APIs externas".
+
+**Hito 8.2 — UI de alimentación del sistema + camino de fraude alcanzable.**
+La pregunta "¿cómo subo los documentos para que los agentes los analicen?" se resuelve:
+- `streamlit_app.py` añade un **`file_uploader`** (PNG/JPG/WEBP/PDF) en el formulario; los ficheros
+  llegan al Agente C, que los analiza con Claude y muestra lo leído en una sección "Extracción
+  multimodal real (Claude Vision)".
+- Se añade el campo **"Nombre del asegurado"** → el Agente G ya puede comparar contra la lista
+  OFAC/ONU (antes el camino de FRAUDE/BLOQUEO no era alcanzable desde el formulario).
+- `process_claim` y `ClaimState` aceptan `uploaded_files` y `client_name` (cambios aditivos: sin
+  archivos, el flujo es idéntico al anterior → los 42 tests siguen verde).
+
+**Hito 8.3 — Verificación del VLM.**
+Verificado con una factura sintética: Claude leyó correctamente importe **3.200,00 €**, fecha
+2026-05-10, emisor "Taller Mecánico Martínez" y tipo "factura" (confianza 0,99). La extracción
+multimodal es **genuina**, no simulada.

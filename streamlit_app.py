@@ -238,7 +238,8 @@ def render_timeline(result: dict) -> None:
                 st.markdown(step)
 
 
-def process_and_store(client_id, client_email, claim_type, amount, documents):
+def process_and_store(client_id, client_email, claim_type, amount, documents,
+                      client_name=None, uploaded=None):
     claim_id = f"CLM-{uuid.uuid4().hex[:8].upper()}"
     with st.spinner("Procesando la reclamación con los agentes..."):
         start = time.time()
@@ -246,12 +247,22 @@ def process_and_store(client_id, client_email, claim_type, amount, documents):
             claim_id=claim_id, client_id=client_id, claim_type=claim_type,
             amount_requested=float(amount), channel="web",
             documents=documents, client_email=client_email,
+            client_name=client_name, uploaded_files=uploaded,
         ))
     result.update({"_elapsed": time.time() - start, "_claim_id": claim_id,
                    "_client_id": client_id, "_claim_type": claim_type,
                    "_amount_requested": float(amount)})
     st.session_state["last_result"] = result
     st.session_state["history"].insert(0, result)
+
+
+def read_uploads(files) -> list[dict]:
+    """Convierte los ficheros de st.file_uploader en la forma que espera el Agente C."""
+    out = []
+    for f in files or []:
+        out.append({"filename": f.name, "media_type": f.type or "image/png",
+                    "data": f.getvalue(), "doc_type": "auto"})
+    return out
 
 
 def render_result(result: dict) -> None:
@@ -279,6 +290,26 @@ def render_result(result: dict) -> None:
         extra = f" · score {score:.2f}" if isinstance(score, (int, float)) else ""
         st.markdown('<div class="sca-section">Cribado antifraude (Agente G)</div>', unsafe_allow_html=True)
         st.markdown(pill(f"{verdict}{extra}", kind), unsafe_allow_html=True)
+
+    extraction = result.get("extraction_result") or {}
+    if extraction.get("source") == "claude_vision" and extraction.get("by_document"):
+        st.markdown('<div class="sca-section">Extracción multimodal real (Agente C · Claude Vision)</div>',
+                    unsafe_allow_html=True)
+        for name, doc in extraction["by_document"].items():
+            with st.container(border=True):
+                st.markdown(f"**{name}** · {doc.get('doc_type', '—')}")
+                d1, d2, d3 = st.columns(3)
+                amt = doc.get("amount")
+                d1.markdown(metric_card("Importe leído",
+                            f"{amt:,.0f} €" if isinstance(amt, (int, float)) else "—"),
+                            unsafe_allow_html=True)
+                d2.markdown(metric_card("Fecha", doc.get("date") or "—"), unsafe_allow_html=True)
+                d3.markdown(metric_card("Confianza",
+                            f"{(doc.get('confidence') or 0) * 100:.0f}%"), unsafe_allow_html=True)
+                if doc.get("summary"):
+                    st.caption(doc["summary"])
+        st.caption("El importe de la decisión es el indicado en el formulario; arriba se muestra lo que "
+                   "Claude ha leído de los documentos subidos.")
 
     st.markdown('<div class="sca-section">Cadena de razonamiento de los agentes</div>', unsafe_allow_html=True)
     render_timeline(result)
@@ -363,18 +394,25 @@ elif view == "nueva":
                 unsafe_allow_html=True)
     with st.form("claim_form"):
         a, b = st.columns(2)
-        client_id = a.text_input("ID Cliente", value="CLIENT-A")
-        client_email = b.text_input("Email del cliente", value="cliente@segurospepin.com")
-        claim_type = a.selectbox("Tipo de siniestro", options=list(CLAIM_TYPES.keys()),
+        client_name = a.text_input("Nombre del asegurado", value="Juan García",
+                                   help="Se compara contra la lista OFAC/ONU en el cribado antifraude.")
+        client_id = b.text_input("ID Cliente", value="CLIENT-A")
+        client_email = a.text_input("Email del cliente", value="cliente@segurospepin.com")
+        claim_type = b.selectbox("Tipo de siniestro", options=list(CLAIM_TYPES.keys()),
                                  format_func=lambda k: CLAIM_TYPES[k])
-        amount = b.number_input("Importe reclamado (€)", min_value=0.0, max_value=100000.0,
+        amount = a.number_input("Importe reclamado (€)", min_value=0.0, max_value=100000.0,
                                 value=2500.0, step=100.0)
         docs_avail = REQUIRED_DOCS_BY_TYPE.get(claim_type, [])
-        documents = st.multiselect("Documentos aportados", options=docs_avail, default=docs_avail,
-                                   help="Deselecciona alguno para simular documentación incompleta.")
+        documents = b.multiselect("Documentos aportados (tipo)", options=docs_avail, default=docs_avail,
+                                  help="Deselecciona alguno para simular documentación incompleta.")
+        uploaded = st.file_uploader(
+            "Sube los documentos reales (factura, foto de daños, acta...) — el Agente C los analizará con Claude Vision",
+            type=["png", "jpg", "jpeg", "webp", "pdf"], accept_multiple_files=True,
+        )
         submitted = st.form_submit_button("Procesar reclamación", use_container_width=True)
     if submitted:
-        process_and_store(client_id, client_email, claim_type, amount, documents)
+        process_and_store(client_id, client_email, claim_type, amount, documents,
+                          client_name=client_name, uploaded=read_uploads(uploaded))
 
     if st.session_state.get("last_result"):
         st.divider()
