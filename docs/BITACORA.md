@@ -213,3 +213,20 @@ orden del flujo (G se ejecutaba antes que C → sin datos extraídos) y (2) la f
 2 tests nuevos (`test_fraud_coherence.py`): con factura previa al siniestro marca incoherencia
 (`factura_previa_al_siniestro`); con fechas coherentes no marca. **Los 4 detectores del Agente G
 están ahora activos.**
+
+## Fase 11 — Memoria Entrega 2 actualizada + evaluación real (junio 2026)
+
+**Hito 11.1 — Capítulos de memoria reescritos al estado real.**
+Se reescriben los 3 capítulos (`01-arquitectura`, `02-herramientas`, `03-manual-usuario`)
+reflejando el sistema ACTUAL: flujo `A→B→C→G→D→E`, Agente G con 4 detectores reales, Agente C con
+Claude Vision real, Agente D con RAG real (ChromaDB), empresa real + Ley 172-13, 47 tests,
+despliegue Streamlit. Verificados contra el código por los redactores.
+
+**Hito 11.2 — Evaluación real (capítulo 04).**
+El evaluador oficial (`evaluate_dataset.py`) requiere Docker y su mapeo de resultados estaba
+desactualizado. Se añade `evaluate_inprocess.py` (in-process, sin Docker, vocabulario actual
+PAGO/RECHAZO/REVISION_HUMANA/INFO_REQUERIDA/RECHAZO_FRAUDE) con 32 casos (30 base + 2 OFAC).
+**Resultado real: precisión 100 % (32/32)**, matriz de confusión diagonal; OFAC bloquea los 2
+casos sancionados (`RECHAZO_FRAUDE`); cobertura por RAG real en el 68,8 % de los casos; TRA 50 %,
+HITL 25 %. El motor determinista elimina el falso positivo aleatorio del mock anterior (96,7 % →
+100 %). Se reescribe `04-evaluacion.md` con estas métricas.
