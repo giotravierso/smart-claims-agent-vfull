@@ -1,0 +1,12 @@
+# Tema fijo (claro + marca Seguros Pepín) para que el dashboard se vea igual
+# en Streamlit Cloud independientemente del tema del visor.
+[theme]
+base = "light"
+primaryColor = "#0B4DA2"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F3F3F3"
+textColor = "#16325C"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
