@@ -31,6 +31,10 @@ try:
 except Exception:
     pass
 
+# Activa el RAG real de pólizas (ChromaDB embebido) en el Agente D. Si ChromaDB
+# no estuviera disponible, el agente cae automáticamente al catálogo determinista.
+os.environ.setdefault("SCA_RAG_ENABLED", "1")
+
 try:
     from dotenv import find_dotenv, load_dotenv
     load_dotenv(find_dotenv())
@@ -290,6 +294,15 @@ def render_result(result: dict) -> None:
         extra = f" · score {score:.2f}" if isinstance(score, (int, float)) else ""
         st.markdown('<div class="sca-section">Cribado antifraude (Agente G)</div>', unsafe_allow_html=True)
         st.markdown(pill(f"{verdict}{extra}", kind), unsafe_allow_html=True)
+
+    cov = result.get("coverage_result") or {}
+    if cov.get("source") == "rag":
+        st.markdown('<div class="sca-section">Cobertura (Agente D · RAG sobre pólizas)</div>',
+                    unsafe_allow_html=True)
+        st.markdown(pill(f"Recuperado por RAG · {cov.get('policy_section', '—')}", "info"),
+                    unsafe_allow_html=True)
+        if cov.get("retrieved_snippet"):
+            st.caption(cov["retrieved_snippet"])
 
     extraction = result.get("extraction_result") or {}
     if extraction.get("source") == "claude_vision" and extraction.get("by_document"):

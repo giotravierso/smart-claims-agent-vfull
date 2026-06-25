@@ -161,3 +161,30 @@ La pregunta "¿cómo subo los documentos para que los agentes los analicen?" se 
 Verificado con una factura sintética: Claude leyó correctamente importe **3.200,00 €**, fecha
 2026-05-10, emisor "Taller Mecánico Martínez" y tipo "factura" (confianza 0,99). La extracción
 multimodal es **genuina**, no simulada.
+
+## Fase 9 — RAG REAL de pólizas (Agente D) (junio 2026)
+
+**Hito 9.1 — De tabla de reglas a RAG vectorial.**
+El Agente D (cobertura) se anunciaba como "RAG" pero era una **tabla de reglas** (`check_policy`):
+ChromaDB estaba levantado pero no se usaba. Se implementa **RAG real**:
+- **Pólizas sintéticas** en `data/policies/*.md` (4 docs SP-PCS-009, con frontmatter:
+  claim_type, sección, cobertura, límite, franquicia, summary). Claramente marcadas como
+  *placeholder*; en producción se alimenta con las pólizas reales de Seguros Pepín.
+- **`backend/app/rag/policy_store.py`**: indexa las pólizas en **ChromaDB embebido** (en proceso,
+  sin servidor) y recupera por **búsqueda vectorial con filtro de metadato** (`where claim_type`).
+- **Agente D** usa la cobertura recuperada por RAG (citando la sección) con **fallback** a
+  `check_policy` si el RAG no está disponible. Gated por `SCA_RAG_ENABLED` (la app y Docker lo
+  activan; los tests existentes no → siguen usando el mock, sin cambios).
+
+**Hito 9.2 — Embedding ligero + decisión de diseño.**
+El embedding por defecto de ChromaDB (ONNX MiniLM) es de **inglés** y recupera mal el español.
+En vez de cargar un modelo multilingüe pesado (torch, arriesgado en Streamlit Cloud), se usa
+**metadata filtering** por `claim_type`: la búsqueda vectorial rankea la cláusula más relevante
+**dentro del tipo de siniestro**. Robusto con corpus pequeño y escalable a varias cláusulas por
+tipo. Mantiene el deploy ligero (chromadb + onnxruntime, sin torch).
+
+**Hito 9.3 — Verificación.**
+3 tests nuevos (`test_rag.py`): recuperación correcta por tipo (4/4), el Agente D usa RAG y
+calcula la cobertura (`danys_propis` 3.200 € → neto 2.900 €, cita SP-PCS-009 §3.2), y fallback al
+mock cuando el RAG está desactivado. La UI muestra la sección de póliza recuperada por RAG.
+**Esto cierra la mayor brecha del proyecto**: el "RAG" ya no es ficticio.

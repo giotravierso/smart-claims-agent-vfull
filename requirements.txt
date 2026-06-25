@@ -12,6 +12,11 @@ langgraph==1.2.1
 langchain-anthropic==1.4.3
 anthropic==0.104.1
 
+# RAG real de polizas (Agente D) — ChromaDB embebido + embeddings ONNX.
+# Si el build fallara o no estuviera disponible, el Agente D cae al catalogo
+# determinista (la app sigue funcionando).
+chromadb==1.5.9
+
 # Persistencia (best-effort; en Streamlit Cloud no hay MariaDB y se omite)
 SQLAlchemy[asyncio]==2.0.31
 aiomysql==0.3.2
