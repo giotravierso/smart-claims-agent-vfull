@@ -4,58 +4,62 @@
 
 En los sistemas de inteligencia artificial basados en agentes, el término *herramienta* (en inglés, *tool*) designa una función de código que el modelo de lenguaje puede invocar de forma autónoma cuando lo considera necesario para resolver una tarea. Esta capacidad, conocida como *function calling* o *tool use*, transforma al modelo de lenguaje de un generador de texto en un agente capaz de actuar sobre el entorno: consultar bases de datos, ejecutar cálculos, enviar notificaciones o registrar decisiones (Anthropic, 2024).
 
-El mecanismo de invocación es el siguiente: al modelo se le proporciona, junto con el mensaje del usuario, una descripción estructurada de cada herramienta disponible —su nombre, los parámetros que acepta y su propósito—. El modelo razona sobre cuál herramienta invocar y con qué argumentos; a continuación, el orquestador ejecuta la función correspondiente y devuelve el resultado al modelo para que continúe su razonamiento. Este ciclo de *razonamiento → acción → observación* es el núcleo del paradigma ReAct (Yao et al., 2023), sobre el que se fundamentan los agentes de LangGraph empleados en Smart-Claims Agent.
+El mecanismo de invocación es el siguiente: al modelo se le proporciona, junto con el mensaje del usuario, una descripción estructurada de cada herramienta disponible —su nombre, los parámetros que acepta y su propósito—. El modelo razona sobre cuál herramienta invocar y con qué argumentos; a continuación, el orquestador ejecuta la función correspondiente y devuelve el resultado al modelo para que continúe su razonamiento. Este ciclo de *razonamiento → acción → observación* es el núcleo del paradigma ReAct (Yao et al., 2023), sobre el que se fundamenta el helper `reason()` empleado en Smart-Claims Agent.
 
-En la implementación concreta de este proyecto, las herramientas se definen mediante el decorador `@tool` de LangChain (Chase, 2022). Este decorador analiza la firma de la función Python y su *docstring* para construir automáticamente el esquema JSON que se expone al modelo. De esta forma, el agente puede decidir en tiempo de ejecución, sin programación explícita de flujo, si debe validar documentos, comprobar coberturas o emitir un pago.
+En la implementación concreta de este proyecto, las herramientas se definen mediante el decorador `@tool` de LangChain (Chase, 2022). Este decorador analiza la firma de la función Python y su *docstring* para construir automáticamente el esquema JSON que se expone al modelo. Las herramientas residen en `backend/app/tools/claim_tools.py` y se invocan desde los nodos de los agentes a través del método `.invoke()`.
+
+A diferencia de un enfoque ReAct puro en el que el LLM decide libremente qué herramienta invocar en cada paso, en Smart-Claims Agent **la asignación herramienta–agente es fija y determinista**: cada agente sabe qué herramientas invocará y en qué orden. Esta decisión refuerza la trazabilidad y la reproducibilidad descritas en el capítulo de arquitectura, sin renunciar a la generación de razonamiento natural que aporta el LLM.
 
 **Restricción de entorno.** El prototipo Smart-Claims Agent se ha desarrollado sin acceso a los sistemas reales de Seguros Pepín, S.A. En consecuencia, la totalidad de las herramientas son *mocks definitivos*: implementaciones simuladas que reproducen fielmente las interfaces (firmas, esquemas de entrada y salida) que tendrían sus equivalentes en producción, pero cuya lógica interna genera datos sintéticos o deterministas. Esta decisión de diseño permite demostrar todos los caminos de ejecución del grafo —aprobación, rechazo, solicitud de información adicional, alerta de fraude— de manera reproducible y sin dependencias externas. En cada subsección se documenta explícitamente cómo debería ser la **integración real** en un entorno productivo.
 
----
+**Persistencia y registro de decisiones.** El registro de decisiones (Chain of Thought de cada agente) **no es una herramienta**, sino una funcionalidad transversal implementada por la capa de repositorio (`app/db/repository.py`). Cada agente acumula su contribución en el campo `decisions_log` del estado compartido durante la ejecución del grafo, y la función `process_claim` persiste todas las decisiones en MariaDB en una única transacción al final del flujo (véase el capítulo de arquitectura, sección 6). Esta separación entre herramientas (acciones sobre el mundo externo) y persistencia (efecto secundario interno gestionado por el repositorio) sigue el principio de separación de responsabilidades.
 
 ## 3.2 Tabla resumen de las herramientas
 
-La tabla siguiente ofrece una visión consolidada de las ocho herramientas que componen el catálogo del sistema, indicando el agente o nodo del grafo LangGraph que las invoca, su propósito principal y su estado de implementación en el prototipo.
+La tabla siguiente ofrece una visión consolidada de las **siete herramientas** que componen el catálogo del sistema, indicando el agente que las invoca, su propósito principal y su estado de implementación.
 
 | # | Herramienta | Agente | Propósito | Estado |
 |---|---|---|---|---|
 | 1 | `validate_documents` | B – Validación documental | Verificar que los documentos requeridos están presentes y la póliza está activa | Mock |
 | 2 | `extract_multimodal` | C – Extracción multimodal (VLM) | Extraer datos estructurados de imágenes, facturas y actas policiales | Mock |
-| 3 | `check_policy` | D – Cobertura (RAG) | Comprobar cobertura, límites y franquicia según el tipo de siniestro | Mock |
-| 4 | `approve_payment` | E – Resolución | Emitir la orden de pago al asegurado | Mock |
-| 5 | `send_rejection` | E – Resolución | Enviar la comunicación de rechazo justificado al cliente | Mock |
-| 6 | `request_more_info` | B – Validación documental | Solicitar documentación faltante al tomador | Mock |
-| 7 | `check_fraud` | G – Fraude y cumplimiento | Cribar indicios de fraude y cumplimiento normativo (LA/FT, OFAC) | Mock |
-| 8 | `log_decision` | Transversal | Registrar la decisión de cada agente para auditoría | Mock |
+| 3 | `check_policy` | D – Cobertura | Comprobar cobertura, límites y franquicia según el tipo de siniestro | Mock |
+| 4 | `check_fraud` | G – Fraude y cumplimiento | Cribar indicios de fraude y cumplimiento normativo (LA/FT, OFAC) | Mock |
+| 5 | `approve_payment` | E – Resolución | Emitir la orden de pago al asegurado | Mock |
+| 6 | `send_rejection` | E – Resolución | Enviar la comunicación de rechazo justificado al cliente | Mock |
+| 7 | `request_more_info` | B – Validación documental | Solicitar documentación faltante al tomador | Mock |
 
----
+El conjunto se exporta como `AGENT_TOOLS` desde `claim_tools.py`, lo que facilita su registro en LangChain o su inspección unitaria desde los tests.
 
 ## 3.3 Descripción detallada de las herramientas
 
 ### 3.3.1 `validate_documents`
 
-**Propósito.** Comprueba que el expediente de reclamación contiene la documentación mínima exigida por el procedimiento interno de Seguros Pepín —fotografías de los daños, factura de reparación y, cuando aplica, acta policial— y que la póliza asociada se encuentra en vigor en la fecha del siniestro.
+**Propósito.** Comprueba que el expediente de reclamación contiene la documentación mínima exigida por el procedimiento interno de Seguros Pepín y que la póliza asociada se encuentra en vigor. El conjunto de documentos requeridos depende del tipo de siniestro y se centraliza en la constante `REQUIRED_DOCS_BY_TYPE` del mismo módulo, garantizando que la herramienta y el agente B comparten una única fuente de verdad.
 
 **Parámetros de entrada.**
 
 | Parámetro | Tipo | Descripción |
 |---|---|---|
 | `claim_id` | `str` | Identificador único de la reclamación |
-| `doc_types` | `list[str]` | Lista de tipos documentales aportados (p. ej., `["foto_danys", "factura"]`) |
+| `claim_type` | `str` | Tipo de siniestro (`danys_propis`, `responsabilitat`, `robatori`, `danys_mecanics`, `default`) |
+| `doc_types` | `list[str]` | Lista de tipos documentales aportados |
 
 **Salida.**
 
 | Campo | Tipo | Descripción |
 |---|---|---|
+| `claim_id` | `str` | Identificador del expediente |
+| `claim_type` | `str` | Tipo de siniestro evaluado |
 | `is_valid` | `bool` | Indica si el conjunto documental es suficiente |
 | `missing_docs` | `list[str]` | Tipos documentales ausentes |
+| `required_docs` | `list[str]` | Lista de documentos requeridos para este tipo |
+| `provided_docs` | `list[str]` | Documentos efectivamente aportados |
 | `contract_active` | `bool` | Estado de la póliza en la fecha del siniestro |
 | `checked_at` | `str` | Marca temporal ISO 8601 de la verificación |
 
-**Agente que la invoca.** Nodo B (Validación documental). Es la primera herramienta que se ejecuta en el grafo, actuando como filtro de entrada.
+**Agente que la invoca.** Nodo B (Validación documental).
 
-**Mock → Integración real.** En el prototipo, la herramienta simula la verificación comparando la lista de documentos aportados con un conjunto esperado codificado en la propia función. En producción, la llamada debería dirigirse al **gestor documental corporativo (ECM)** de Seguros Pepín para confirmar la presencia y la integridad de los ficheros adjuntos, y al **core asegurador** (sistema de gestión de pólizas) para validar que el contrato estaba activo en la fecha del siniestro declarada.
-
----
+**Mock → Integración real.** En el prototipo, la herramienta simula la verificación comparando la lista de documentos aportados con el conjunto requerido en `REQUIRED_DOCS_BY_TYPE`. En producción, la llamada debería dirigirse al **gestor documental corporativo (ECM)** de Seguros Pepín para confirmar la presencia y la integridad de los ficheros adjuntos, y al **core asegurador** (sistema de gestión de pólizas) para validar que el contrato estaba activo en la fecha del siniestro declarada.
 
 ### 3.3.2 `extract_multimodal`
 
@@ -67,21 +71,22 @@ La tabla siguiente ofrece una visión consolidada de las ocho herramientas que c
 |---|---|---|
 | `claim_id` | `str` | Identificador de la reclamación |
 | `file_url` | `str` | URL o ruta del fichero a analizar |
-| `doc_type` | `str` | Tipo documental (`"foto_danys"`, `"factura"`, `"acta_policial"`, etc.) |
+| `doc_type` | `str` | Tipo documental (`foto_danys`, `factura`, `acta_policial`, etc.) |
 
 **Salida.**
 
 | Campo | Tipo | Descripción |
 |---|---|---|
-| `extracted` | `dict` | Datos estructurados extraídos: importe, fecha, descripción de daños, número de acta, etc. |
+| `claim_id` | `str` | Identificador del expediente |
+| `doc_type` | `str` | Tipo documental procesado |
+| `extracted` | `dict` | Datos estructurados extraídos (importe, fecha, descripción de daños, partes, etc.) |
 | `confidence` | `float` | Confianza de la extracción en el rango [0, 1] |
-| `model` | `str` | Identificador del modelo empleado |
+| `model` | `str` | Identificador del modelo empleado (`claude-sonnet-4-6 (mock)` en el prototipo) |
+| `extracted_at` | `str` | Marca temporal de la extracción |
 
-**Agente que la invoca.** Nodo C (Extracción multimodal / VLM).
+**Agente que la invoca.** Nodo C (Extracción multimodal). El agente invoca la herramienta una vez por cada documento del expediente y calcula la confianza media; los documentos con confianza inferior a `LOW_CONFIDENCE_THRESHOLD` (0,85) se marcan para revisión.
 
 **Mock → Integración real.** El mock devuelve datos sintéticos plausibles sin procesar ningún fichero real. En un entorno productivo, la herramienta invocaría la **API de Claude con capacidades de visión** (Anthropic, 2024) sobre los adjuntos reales del expediente, enviando la imagen codificada en Base64 junto con un *prompt* estructurado que solicite la extracción de los campos relevantes. Para documentos de baja calidad o resolución insuficiente se contemplaría un *fallback* a OCR clásico mediante Tesseract.
-
----
 
 ### 3.3.3 `check_policy`
 
@@ -92,26 +97,55 @@ La tabla siguiente ofrece una visión consolidada de las ocho herramientas que c
 | Parámetro | Tipo | Descripción |
 |---|---|---|
 | `claim_id` | `str` | Identificador de la reclamación |
-| `claim_type` | `str` | Tipo de siniestro (p. ej., `"robo"`, `"incendio"`, `"daños_agua"`) |
+| `claim_type` | `str` | Tipo de siniestro |
 | `amount` | `float` | Importe reclamado en euros |
 
 **Salida.**
 
 | Campo | Tipo | Descripción |
 |---|---|---|
+| `claim_id` | `str` | Identificador del expediente |
+| `claim_type` | `str` | Tipo de siniestro evaluado |
+| `amount_requested` | `float` | Importe reclamado |
 | `covered` | `bool` | Indica si el siniestro está amparado por la póliza |
 | `max_coverage` | `float` | Límite máximo de cobertura aplicable (€) |
 | `deductible` | `float` | Franquicia a cargo del asegurado (€) |
 | `net_payable` | `float` | Importe neto a satisfacer tras aplicar límites y franquicia (€) |
-| `policy_section` | `str` | Cláusula o sección de la póliza que ampara la cobertura |
+| `policy_section` | `str` | Cláusula o sección de la póliza que ampara la cobertura (p. ej., `SP-PCS-009 § 3.2`) |
 
-**Agente que la invoca.** Nodo D (Cobertura / RAG).
+**Agente que la invoca.** Nodo D (Verificación de cobertura).
 
-**Mock → Integración real.** En el prototipo, los valores de cobertura están predefinidos en tablas estáticas según el tipo de siniestro. La integración real proyectada emplea **Retrieval-Augmented Generation (RAG)** (Lewis et al., 2020): los condicionados de las pólizas de Seguros Pepín se indexarían en una base de datos vectorial —ChromaDB en el diseño actual— y el agente recuperaría los fragmentos relevantes mediante búsqueda semántica para extraer los límites y exclusiones aplicables a cada caso concreto. Esta fase se ha identificado como desarrollo posterior al MVP.
+**Mock → Integración real.** En el prototipo, los valores de cobertura están predefinidos en tablas estáticas según el tipo de siniestro y citan las secciones reales de los procedimientos SP-PCS-009 de Seguros Pepín. La integración real proyectada emplea **Retrieval-Augmented Generation (RAG)** (Lewis et al., 2020) sobre el corpus completo de pólizas indexado en **ChromaDB**, con búsqueda semántica de los fragmentos relevantes para extraer los límites y exclusiones aplicables a cada caso concreto. Esta fase se ha identificado como desarrollo posterior al MVP.
 
----
+### 3.3.4 `check_fraud`
 
-### 3.3.4 `approve_payment`
+**Propósito.** Realiza un cribado temprano de la reclamación para detectar posibles indicios de fraude y verificar el cumplimiento de la normativa de prevención del blanqueo de capitales y financiación del terrorismo (LA/FT). Incluye la comprobación del tomador contra listas de sanciones internacionales (OFAC, ONU).
+
+**Parámetros de entrada.**
+
+| Parámetro | Tipo | Descripción |
+|---|---|---|
+| `claim_id` | `str` | Identificador de la reclamación |
+| `client_id` | `str` | Identificador del cliente/tomador |
+| `amount` | `float` | Importe reclamado (€) |
+
+**Salida.**
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `claim_id` | `str` | Identificador del expediente |
+| `client_id_hash` | `int` | Hash anonimizado del cliente (no expone el ID real en los logs) |
+| `is_flagged` | `bool` | Indica si la reclamación activa alguna alerta de fraude |
+| `risk_score` | `float` | Puntuación de riesgo en el rango [0, 1] |
+| `ofac_match` | `bool` | Coincidencia con listas de sanciones OFAC/ONU |
+| `fraud_indicators` | `list[str]` | Lista de indicadores de riesgo detectados |
+| `checked_at` | `str` | Marca temporal del cribado |
+
+**Agente que la invoca.** Nodo G (Fraude y cumplimiento). Es el primer agente del grafo después del triaje, actuando como **filtro de entrada**: si `is_flagged` es `true`, el supervisor termina el flujo inmediatamente sin invocar al resto de agentes.
+
+**Mock → Integración real.** En el prototipo, el `risk_score` se genera con aleatoriedad controlada por una semilla fija (`random.seed(7)` en la CLI de demostración) para poder reproducir tanto el camino de alerta como el de aprobación durante las pruebas. En producción, la herramienta consultaría las **listas consolidadas de sanciones de la OFAC y la ONU** a través de su API oficial, y enviaría los datos de la reclamación al **motor antifraude corporativo** de Seguros Pepín —basado en reglas de negocio y modelos de *scoring* de riesgo LA/FT— para obtener una valoración fundamentada.
+
+### 3.3.5 `approve_payment`
 
 **Propósito.** Emite la orden de pago al asegurado una vez que la reclamación ha sido aprobada. Registra el identificador de transacción y la fecha prevista de abono.
 
@@ -127,46 +161,44 @@ La tabla siguiente ofrece una visión consolidada de las ocho herramientas que c
 
 | Campo | Tipo | Descripción |
 |---|---|---|
+| `claim_id` | `str` | Identificador del expediente |
 | `transaction_id` | `str` | Identificador único de la transacción generada |
 | `amount` | `float` | Importe abonado (€) |
-| `iban_last4` | `str` | Últimos cuatro dígitos del IBAN (para trazabilidad sin exponer datos sensibles) |
-| `status` | `str` | Estado de la orden (`"scheduled"`, `"processed"`, etc.) |
+| `iban_last4` | `str` | Últimos cuatro dígitos del IBAN (trazabilidad sin exponer datos sensibles) |
+| `status` | `str` | Estado de la orden (`scheduled`, `processed`, etc.) |
 | `scheduled_date` | `str` | Fecha prevista de transferencia (ISO 8601) |
 
-**Agente que la invoca.** Nodo E (Resolución). Se invoca cuando el agente de resolución concluye que la reclamación es válida, está cubierta y no presenta indicios de fraude.
+**Agente que la invoca.** Nodo E (Resolución). Se invoca cuando el agente de resolución concluye que la reclamación es válida, está cubierta y el importe está por debajo del umbral HITL.
 
 **Mock → Integración real.** El mock genera un `transaction_id` aleatorio y una fecha calculada a partir del momento de ejecución. En producción, la herramienta se conectaría a la **pasarela de pagos o al core financiero** de Seguros Pepín para emitir una orden de transferencia bancaria real, con los controles de autorización, firma y reconciliación que exige la operativa aseguradora.
 
----
+### 3.3.6 `send_rejection`
 
-### 3.3.5 `send_rejection`
-
-**Propósito.** Comunica al asegurado la resolución denegatoria de su reclamación, incluyendo una justificación clara y los plazos para ejercer su derecho de reclamación, conforme a las obligaciones de información establecidas por la Dirección General de Seguros y Fondos de Pensiones (DGSFP).
+**Propósito.** Comunica al asegurado la resolución denegatoria de su reclamación, incluyendo una justificación clara y los plazos para ejercer su derecho de reclamación, conforme a las obligaciones de información establecidas por la Superintendencia de Seguros de la República Dominicana.
 
 **Parámetros de entrada.**
 
 | Parámetro | Tipo | Descripción |
 |---|---|---|
 | `claim_id` | `str` | Identificador de la reclamación |
-| `reason` | `str` | Motivo del rechazo (texto libre generado por el agente) |
+| `reason` | `str` | Motivo del rechazo (texto generado por el agente, normalmente vía LLM) |
 | `client_email` | `str` | Dirección de correo electrónico del asegurado |
 
 **Salida.**
 
 | Campo | Tipo | Descripción |
 |---|---|---|
+| `claim_id` | `str` | Identificador del expediente |
 | `email_id` | `str` | Identificador del mensaje enviado |
 | `sent_to` | `str` | Dirección de destino |
-| `reason_summary` | `str` | Resumen del motivo de rechazo |
+| `reason_summary` | `str` | Resumen del motivo de rechazo (primeros 200 caracteres) |
 | `sent_at` | `str` | Marca temporal del envío (ISO 8601) |
 
-**Agente que la invoca.** Nodo E (Resolución).
+**Agente que la invoca.** Nodo E (Resolución), cuando el agente D ha determinado que el siniestro no está cubierto.
 
 **Mock → Integración real.** El mock registra en consola y devuelve los metadatos del mensaje sin realizar ningún envío real. En producción, la herramienta invocaría el **sistema de notificaciones corporativo o el CRM** de Seguros Pepín para generar y enviar la comunicación mediante el canal acordado con el cliente (correo electrónico, SMS, área de cliente), garantizando el registro de acuse de recibo para fines de cumplimiento.
 
----
-
-### 3.3.6 `request_more_info`
+### 3.3.7 `request_more_info`
 
 **Propósito.** Solicita al asegurado que aporte la documentación o información adicional necesaria para continuar con la tramitación de la reclamación, especificando los campos concretos que faltan y el plazo disponible para su presentación.
 
@@ -182,85 +214,28 @@ La tabla siguiente ofrece una visión consolidada de las ocho herramientas que c
 
 | Campo | Tipo | Descripción |
 |---|---|---|
+| `claim_id` | `str` | Identificador del expediente |
 | `request_id` | `str` | Identificador de la solicitud de información |
 | `fields_requested` | `list[str]` | Campos solicitados (eco de la entrada) |
 | `sent_to` | `str` | Dirección de destino |
-| `deadline_days` | `int` | Días hábiles concedidos al asegurado para responder |
+| `deadline_days` | `int` | Días concedidos al asegurado para responder (10 por defecto en el mock) |
+| `sent_at` | `str` | Marca temporal del envío |
 
-**Agente que la invoca.** Nodo B (Validación documental). Se activa cuando `validate_documents` detecta documentos ausentes pero la reclamación no es descartable de forma definitiva.
+**Agente que la invoca.** Nodo B (Validación documental). Se activa cuando `validate_documents` detecta documentos ausentes.
 
-**Mock → Integración real.** En producción, la herramienta interactuaría con el **portal del cliente de Seguros Pepín** o con el proveedor de **correo electrónico transaccional** (p. ej., SendGrid, AWS SES) para generar una comunicación personalizada con enlace directo a la sección de carga de documentos, integrando el seguimiento del estado en el sistema de gestión de expedientes.
-
----
-
-### 3.3.7 `check_fraud`
-
-**Propósito.** Realiza un cribado temprano de la reclamación para detectar posibles indicios de fraude y verificar el cumplimiento de la normativa de prevención del blanqueo de capitales y financiación del terrorismo (LA/FT). Incluye la comprobación del tomador contra listas de sanciones internacionales.
-
-**Parámetros de entrada.**
-
-| Parámetro | Tipo | Descripción |
-|---|---|---|
-| `claim_id` | `str` | Identificador de la reclamación |
-| `client_id` | `str` | Identificador del cliente/tomador |
-| `amount` | `float` | Importe reclamado (€) |
-
-**Salida.**
-
-| Campo | Tipo | Descripción |
-|---|---|---|
-| `is_flagged` | `bool` | Indica si la reclamación activa alguna alerta de fraude |
-| `risk_score` | `float` | Puntuación de riesgo en el rango [0, 1] |
-| `ofac_match` | `bool` | Coincidencia con listas de sanciones OFAC/ONU |
-| `fraud_indicators` | `list[str]` | Lista de indicadores de riesgo detectados |
-
-**Agente que la invoca.** Nodo G (Fraude y cumplimiento). Opera como filtro temprano en el grafo, previo a la verificación de cobertura y a la emisión de cualquier pago.
-
-**Mock → Integración real.** En el prototipo, el `risk_score` se genera con aleatoriedad controlada (semilla fija) para poder demostrar tanto el camino de alerta como el de aprobación durante las pruebas. En producción, la herramienta consultaría las **listas consolidadas de sanciones de la OFAC y la ONU** a través de su API oficial, y enviaría los datos de la reclamación al **motor antifraude corporativo** de Seguros Pepín —basado en reglas de negocio y modelos de *scoring* de riesgo LA/FT— para obtener una valoración fundamentada.
-
----
-
-### 3.3.8 `log_decision`
-
-**Propósito.** Registra la decisión tomada por un agente del grafo —junto con su razonamiento y la acción ejecutada— en un sistema de auditoría persistente. Garantiza la trazabilidad completa del proceso de tramitación y proporciona evidencia para revisiones regulatorias o reclamaciones del asegurado.
-
-**Parámetros de entrada.**
-
-| Parámetro | Tipo | Descripción |
-|---|---|---|
-| `claim_id` | `str` | Identificador de la reclamación |
-| `agent` | `str` | Identificador del agente que toma la decisión (p. ej., `"agent_E"`) |
-| `reasoning` | `str` | Razonamiento del agente expresado en lenguaje natural |
-| `action` | `str` | Acción ejecutada (`"approved"`, `"rejected"`, `"requested_info"`, `"flagged"`, etc.) |
-
-**Salida.**
-
-| Campo | Tipo | Descripción |
-|---|---|---|
-| `log_id` | `str` | Identificador único del registro de auditoría |
-| `stored_at` | `str` | Marca temporal de almacenamiento (ISO 8601) |
-
-**Agente que la invoca.** Transversal: todos los nodos del grafo la invocan al finalizar su ejecución. Es la herramienta con mayor frecuencia de uso en el sistema.
-
-**Nota de implementación.** En el prototipo, la persistencia de las decisiones se centraliza además en la capa de repositorio sobre **MariaDB**, de modo que `log_decision` actúa como interfaz de auditoría mientras la base de datos relacional mantiene el estado completo del expediente. Esta doble capa —registro de auditoría en la herramienta y estado en base de datos— sigue el principio de separación de responsabilidades.
-
-**Mock → Integración real.** En producción, la herramienta escribiría los eventos de decisión en el **sistema de auditoría o SIEM corporativo** de Seguros Pepín (p. ej., Splunk, IBM QRadar), garantizando la inmutabilidad del registro, el sellado temporal certificado y la trazabilidad de la cadena de custodia exigida por el regulador asegurador.
-
----
+**Mock → Integración real.** En producción, la herramienta interactuaría con el **portal del cliente de Seguros Pepín** o con el proveedor de **correo electrónico transaccional** para generar una comunicación personalizada con enlace directo a la sección de carga de documentos, integrando el seguimiento del estado en el sistema de gestión de expedientes.
 
 ## 3.4 Estrategia de simulación: mocks definitivos
 
-La decisión de implementar todas las herramientas como mocks definitivos —en lugar de mocks temporales o integraciones parciales— responde a tres criterios fundamentales:
+La decisión de implementar todas las herramientas como mocks definitivos —en lugar de mocks temporales o integraciones parciales— responde a cuatro criterios fundamentales:
 
 **Reproducibilidad.** Un sistema agéntico presenta comportamiento no determinista a nivel del razonamiento del LLM, pero el entorno de pruebas debe ser reproducible para poder validar los caminos de ejecución del grafo. Al controlar los valores de salida de las herramientas (p. ej., fijar la semilla de aleatoriedad en `check_fraud` o predeterminar qué documentos están presentes en `validate_documents`), es posible verificar de forma sistemática que cada nodo del grafo produce la respuesta esperada ante cada escenario.
 
 **Independencia de sistemas externos.** El desarrollo del prototipo no puede estar condicionado por la disponibilidad, los tiempos de respuesta o los costes de los sistemas reales de Seguros Pepín. Los mocks definitivos eliminan esta dependencia y permiten iterar con rapidez durante la fase de investigación del TFM.
 
-**Fidelidad de la interfaz.** Aunque la lógica interna es simulada, los esquemas de entrada y salida de cada herramienta son idénticos a los que tendría la integración real. Esto garantiza que la sustitución futura de un mock por su equivalente productivo sea un cambio de implementación interna, sin necesidad de modificar los prompts de los agentes ni la estructura del grafo.
+**Fidelidad de la interfaz.** Aunque la lógica interna es simulada, los esquemas de entrada y salida de cada herramienta son idénticos a los que tendría la integración real. Esto garantiza que la sustitución futura de un mock por su equivalente productivo sea un cambio de implementación interna, sin necesidad de modificar el código de los agentes ni la estructura del grafo.
 
-**Cobertura de escenarios.** El conjunto de mocks está diseñado para cubrir todos los caminos de decisión del grafo: reclamación válida y pagada, reclamación rechazada por falta de cobertura, reclamación suspendida por solicitud de documentación, y reclamación bloqueada por alerta de fraude. Esta cobertura completa de ramas es esencial para la evaluación del sistema en el contexto académico del TFM.
-
----
+**Cobertura de escenarios.** El conjunto de mocks está diseñado para cubrir todos los caminos de decisión del grafo: reclamación válida y pagada, reclamación rechazada por falta de cobertura, reclamación suspendida por solicitud de documentación, reclamación bloqueada por alerta de fraude, y reclamación derivada a revisión humana por importe. Esta cobertura completa de ramas es esencial para la evaluación del sistema en el contexto académico del TFM.
 
 ## 3.5 Tabla consolidada: Mock → Integración real
 
@@ -271,13 +246,10 @@ La siguiente tabla resume el camino de producción previsto para cada herramient
 | `validate_documents` | Verificación en gestor documental corporativo (ECM) y core asegurador | ECM de Seguros Pepín + API de pólizas |
 | `extract_multimodal` | Extracción mediante VLM sobre adjuntos reales; fallback OCR | Claude Vision API (Anthropic, 2024) + Tesseract |
 | `check_policy` | Recuperación semántica sobre condicionados indexados (RAG) | ChromaDB + LangChain (Lewis et al., 2020; Chase, 2022) |
+| `check_fraud` | Consulta a listas OFAC/ONU y motor antifraude con scoring LA/FT | API OFAC + motor antifraude corporativo |
 | `approve_payment` | Orden de transferencia al core financiero de Seguros Pepín | Pasarela de pagos / módulo financiero del core asegurador |
 | `send_rejection` | Comunicación formal por canal preferido del cliente | CRM / sistema de notificaciones corporativo |
 | `request_more_info` | Solicitud a través del portal del cliente con enlace de carga | Portal del cliente + email transaccional |
-| `check_fraud` | Consulta a listas OFAC/ONU y motor antifraude con scoring LA/FT | API OFAC + motor antifraude corporativo |
-| `log_decision` | Escritura en sistema de auditoría corporativo con sellado temporal | SIEM corporativo (p. ej., Splunk, IBM QRadar) |
-
----
 
 ## Bibliografía
 

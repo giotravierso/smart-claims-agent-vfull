@@ -59,7 +59,7 @@ El siguiente diagrama ASCII resume la disposición de capas:
 
 ## 3. El patrón Supervisor (Hub-and-Spoke) y su justificación
 
-El sistema implementa un **patrón Supervisor**, también conocido como **Hub-and-Spoke**, sobre **LangGraph**, materializado como un **grafo de estado** dirigido. El **Agente A actúa como supervisor central (hub)** y los agentes especializados (B, C, D, E, G) como radios (*spokes*). La propiedad clave del patrón es que **el supervisor es el único componente que decide el enrutamiento**: cada agente especializado hace su trabajo, escribe su contribución en el estado compartido y devuelve el control al supervisor, que vuelve a evaluar el estado y decide al siguiente.
+El sistema implementa un **patrón Supervisor**, también conocido como **Hub-and-Spoke**, sobre **LangGraph**, materializado como un **grafo de estado** dirigido. El **Agente A actúa como supervisor central (hub)** y los agentes especializados (B, C, D, E, G) como radios (*spokes*). La propiedad clave del patrón es que **el supervisor es el único componente que decide el enrutamiento**: cada agente especializado hace su trabajo, escribe su contribución en el estado compartido y devuelve el control al supervisor, que vuelve a evaluar el estado y decide el siguiente.
 
 Este patrón es una concreción de los sistemas multiagente basados en LLM descritos en la literatura reciente sobre agentes autónomos (Wang et al., 2024), donde la descomposición de una tarea compleja en subtareas asignadas a componentes especializados mejora la fiabilidad frente a un agente monolítico. LangGraph documenta explícitamente esta topología como uno de los patrones canónicos para sistemas multiagente (LangChain AI, 2024).
 
@@ -151,31 +151,31 @@ A (triaje) → G (fraude) → B (docs) → C (extracción) → D (cobertura) →
 Sobre esta espina dorsal se injertan **ramas condicionales** que pueden desviar el expediente antes de llegar a la resolución automática. Las transiciones son decididas siempre por el supervisor a partir del estado acumulado. El diagrama siguiente muestra el flujo completo con sus cinco salidas posibles:
 
 ```
-          ┌──────────────┐
-          │  A · Triaje  │
-          └──────┬───────┘
-                 v
-          ┌──────────────┐   fraude marcado
-          │  G · Fraude  │──────────────────────►  [1] RECHAZO por fraude (END)
-          └──────┬───────┘
-                 v  ok
-          ┌──────────────┐   faltan documentos
-          │   B · Docs   │──────────────────────►  [2] SOLICITUD DE INFORMACIÓN (END)
-          └──────┬───────┘
-                 v  completo
-          ┌──────────────┐
-          │ C·Extracción │
-          └──────┬───────┘
-                 v
-          ┌──────────────┐   sin cobertura
-          │ D · Cobertura│──────────────────────►  [3] RECHAZO justificado
-          └──────┬───────┘
-                 v  cobertura OK
-          ┌──────────────┐   importe > umbral HITL
-          │ E·Resolución │──────────────────────►  [4] REVISIÓN HUMANA (HITL)
-          └──────┬───────┘
-                 v  importe ≤ umbral
-            [5] PAGO automático
+              ┌──────────────┐
+              │  A · Triaje  │
+              └──────┬───────┘
+                     v
+              ┌──────────────┐   fraude marcado
+              │  G · Fraude  │──────────────────────►  [1] RECHAZO por fraude (END)
+              └──────┬───────┘
+                     v  ok
+              ┌──────────────┐   faltan documentos
+              │   B · Docs   │──────────────────────►  [2] SOLICITUD DE INFORMACIÓN (END)
+              └──────┬───────┘
+                     v  completo
+              ┌──────────────┐
+              │ C·Extracción │
+              └──────┬───────┘
+                     v
+              ┌──────────────┐   sin cobertura
+              │ D · Cobertura│──────────────────────►  [3] RECHAZO justificado
+              └──────┬───────┘
+                     v  cobertura OK
+              ┌──────────────┐   importe > umbral HITL
+              │ E·Resolución │──────────────────────►  [4] REVISIÓN HUMANA (HITL)
+              └──────┬───────┘
+                     v  importe ≤ umbral
+                [5] PAGO automático
 ```
 
 Las **cinco salidas** del flujo son:

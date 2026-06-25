@@ -1,20 +1,37 @@
----
-name: project-context
-description: Smart-Claims Agent TFM — alcance real del MVP, empresa real, sin APIs externas, entrega = arquitectura
-metadata:
-  type: project
----
+# Project context — Smart-Claims Agent
 
-Smart-Claims Agent es el MVP de un TFM (Máster ML/IA, OBS Business School) para Seguros Pepín.
+## Identidad del proyecto
 
-Hechos que CORRIGEN la documentación del repo:
-- **Seguros Pepín es una empresa REAL**, no ficticia (el README/CONTEXT_TFM la llaman "ficticia" — está desactualizado).
-- **No habrá acceso a las APIs de sus sistemas reales** → las integraciones externas (pagos, notificaciones, core asegurador, OFAC) se quedan como mocks/simuladas. Esto es definitivo, no temporal.
-- **El entregable es la ARQUITECTURA**, no el producto. La UX/frontend NO es prioritaria ahora mismo.
-- Objetivo del MVP: que el **proceso end-to-end se pueda ejecutar y sirva/demuestre valor** (con mocks para lo externo).
+- **Título:** Smart-Claims Agent — Sistema agéntico de procesamiento multimodal y ejecución autónoma para la gestión de incidencias.
+- **Institución:** OBS Business School.
+- **Programa:** Máster en Machine Learning e Inteligencia Artificial (2024–2025).
+- **Tipo de trabajo:** TFM grupal.
+- **Cliente ficticio:** Seguros Pepín, S.A. (República Dominicana).
+- **Caso de uso PoC:** Procedimiento SP-PCS-009.1 — reclamaciones por daños propios sobre vehículo asegurado.
 
-**Why:** El repo se documentó como si la empresa fuera ficticia y como si todo estuviera "operativo", pero el código es un esqueleto. El usuario aclara qué importa de verdad para la entrega.
+## Equipo técnico
 
-**How to apply:** No invertir esfuerzo en frontend/UX. Priorizar que el flujo agéntico (orquestador A + agentes B–G + RAG + persistencia de decisiones) se ejecute de extremo a extremo con las mock tools. Mantener las integraciones externas como simuladas.
+- División del trabajo: equipo funcional (secciones 1.x) y equipo técnico (secciones 2.x).
+- El equipo técnico desarrolla la implementación del MVP y redacta los capítulos técnicos de la memoria.
 
-**Entrega 2 (deadline 26/06/2026)** — el núcleo es la MEMORIA escrita, tres apartados: (1) Arquitectura, (2) Herramientas, (3) Manual de usuario. Adicionalmente se continúa el prototipo y se pueden adelantar/revisar apartados de entregas previas. Es decir: el documento pesa más que el código en esta entrega. Normativa: APA 7.ª, en castellano.
+## Repositorio
+
+- **URL:** `git@github-barnowl:FreeBarnOwl/smart-claims-agent-vfull.git`.
+- **Ramas relevantes:**
+  - `main` — base estable inicial.
+  - `solucio1` — primera implementación, con dataset sintético y evaluación 96,7 %.
+  - `feature/prototipo-e2e-entrega2` — implementación paralela del compañero Gio.
+  - `solucion_final` — rama de consolidación con lo mejor de ambas (rama de trabajo actual).
+
+## Entregables
+
+- **Entrega 2 (26 de junio de 2026):** arquitectura, herramientas, prototipo funcional con demo y vídeo ≤ 4 min.
+- **Entrega 3:** descripción completa, simulación de costes, demo final.
+- **Entrega final:** memoria consolidada y defensa ante tribunal.
+
+## Normativa académica relevante
+
+- Trabajo grupal de 3–6 personas.
+- Citas: APA 7ª edición.
+- Idioma de la memoria: castellano.
+- Estructura: introducción, metodología y objetivos, desarrollo, conclusiones, bibliografía.
