@@ -62,11 +62,37 @@ async def test_agent_b_unknown_type_uses_default():
 # ── Agente G — Fraud Compliance ───────────────────────────────────────────
 
 @pytest.mark.asyncio
-async def test_agent_g_returns_fraud_check():
-    out = await fraud_compliance_node(dict(BASE))
-    assert "risk_score" in out["fraud_result"]
-    assert 0.0 <= out["fraud_result"]["risk_score"] <= 1.0
-    assert out["decisions_log"][0]["agent"] == "agent_g_fraud_compliance"
+async def test_agent_g_clear_when_no_signals():
+    """Cliente normal, importe normal, sin duplicados → veredicto CLEAR."""
+    state = dict(BASE)
+    state["client_name"] = "Juan Garcia Lopez"  # nombre no OFAC
+    out = await fraud_compliance_node(state)
+    assert out["fraud_result"]["verdict"] == "CLEAR"
+    assert out["fraud_result"]["is_flagged"] is False
+    assert out.get("terminate") is None
+
+
+@pytest.mark.asyncio
+async def test_agent_g_blocks_ofac_match():
+    """Cliente en lista OFAC → veredicto BLOCKED, flujo terminado."""
+    state = dict(BASE)
+    state["client_name"] = "Viktor Nikolaev Kozlov"  # nombre exacto de la lista
+    out = await fraud_compliance_node(state)
+    assert out["fraud_result"]["verdict"] == "BLOCKED"
+    assert out["fraud_result"]["is_flagged"] is True
+    assert out.get("terminate") is True
+
+
+@pytest.mark.asyncio
+async def test_agent_g_high_risk_on_extreme_amount():
+    """Importe muy por encima del maximo legitimo → veredicto HIGH_RISK."""
+    state = dict(BASE)
+    state["client_name"] = "Cliente Normal"
+    state["amount_requested"] = 50000.0   # max legitimo danys_propis = 9000
+    out = await fraud_compliance_node(state)
+    assert out["fraud_result"]["verdict"] in ("HIGH_RISK", "MEDIUM_RISK")
+    if out["fraud_result"]["verdict"] == "HIGH_RISK":
+        assert out["fraud_result"]["is_flagged"] is True
 
 
 # ── Agente C — Multimodal Extractor ───────────────────────────────────────

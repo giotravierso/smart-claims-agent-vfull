@@ -117,33 +117,36 @@ El conjunto se exporta como `AGENT_TOOLS` desde `claim_tools.py`, lo que facilit
 
 **Mock → Integración real.** En el prototipo, los valores de cobertura están predefinidos en tablas estáticas según el tipo de siniestro y citan las secciones reales de los procedimientos SP-PCS-009 de Seguros Pepín. La integración real proyectada emplea **Retrieval-Augmented Generation (RAG)** (Lewis et al., 2020) sobre el corpus completo de pólizas indexado en **ChromaDB**, con búsqueda semántica de los fragmentos relevantes para extraer los límites y exclusiones aplicables a cada caso concreto. Esta fase se ha identificado como desarrollo posterior al MVP.
 
-### 3.3.4 `check_fraud`
+### 3.3.4 Sistema de detección de fraude (cuatro detectores + scoring compuesto)
 
-**Propósito.** Realiza un cribado temprano de la reclamación para detectar posibles indicios de fraude y verificar el cumplimiento de la normativa de prevención del blanqueo de capitales y financiación del terrorismo (LA/FT). Incluye la comprobación del tomador contra listas de sanciones internacionales (OFAC, ONU).
+El cribado antifraude del Agente G no es una única herramienta, sino un sistema modular compuesto por **cuatro detectores deterministas** orquestados por una función de scoring compuesta. Esta arquitectura permite atribuir cada señal de riesgo a una causa concreta y auditable, en lugar de generar un score opaco.
 
-**Parámetros de entrada.**
+Los cuatro detectores residen en `backend/app/tools/fraud_tools.py`:
 
-| Parámetro | Tipo | Descripción |
+| Detector | Función | Salida tipada |
 |---|---|---|
-| `claim_id` | `str` | Identificador de la reclamación |
-| `client_id` | `str` | Identificador del cliente/tomador |
-| `amount` | `float` | Importe reclamado (€) |
+| OFAC/ONU | `check_ofac_sanctions(client_name)` — *fuzzy matching* (SequenceMatcher) contra lista mock de sanciones | `OFACResult` |
+| Anomalía de importe | `check_amount_anomaly(claim_type, amount)` — Z-score sobre baselines históricos por tipo | `AmountResult` |
+| Duplicados | `check_duplicate_claims(client_id, claim_type, history, window_days=90)` — ventana temporal configurable | `DuplicateResult` |
+| Coherencia documental | `check_document_coherence(extracted_data)` — comprobaciones temporales entre documentos | `DocCoherenceResult` |
 
-**Salida.**
+La función `compute_risk_score()` combina los cuatro resultados con pesos calibrados (OFAC 1.0, importe hasta 0.40, duplicado hasta 0.35, incoherencia hasta 0.25) y emite uno de cuatro **veredictos graduados**:
 
-| Campo | Tipo | Descripción |
-|---|---|---|
-| `claim_id` | `str` | Identificador del expediente |
-| `client_id_hash` | `int` | Hash anonimizado del cliente (no expone el ID real en los logs) |
-| `is_flagged` | `bool` | Indica si la reclamación activa alguna alerta de fraude |
-| `risk_score` | `float` | Puntuación de riesgo en el rango [0, 1] |
-| `ofac_match` | `bool` | Coincidencia con listas de sanciones OFAC/ONU |
-| `fraud_indicators` | `list[str]` | Lista de indicadores de riesgo detectados |
-| `checked_at` | `str` | Marca temporal del cribado |
+- `BLOCKED` — coincidencia OFAC/ONU confirmada (rechazo automático).
+- `HIGH_RISK` — score ≥ 0,55 (HITL obligatorio, supervisor termina el flujo).
+- `MEDIUM_RISK` — score ≥ 0,25 (HITL recomendado, decisión humana).
+- `CLEAR` — score < 0,25 (el flujo continúa al siguiente agente).
 
-**Agente que la invoca.** Nodo G (Fraude y cumplimiento). Es el primer agente del grafo después del triaje, actuando como **filtro de entrada**: si `is_flagged` es `true`, el supervisor termina el flujo inmediatamente sin invocar al resto de agentes.
+Esta graduación reemplaza el booleano `is_flagged` plano que tenía la versión inicial, permitiendo decisiones más matizadas y una explicabilidad clara: cada veredicto se acompaña de la lista de señales activadas que lo justifican.
 
-**Mock → Integración real.** En el prototipo, el `risk_score` se genera con aleatoriedad controlada por una semilla fija (`random.seed(7)` en la CLI de demostración) para poder reproducir tanto el camino de alerta como el de aprobación durante las pruebas. En producción, la herramienta consultaría las **listas consolidadas de sanciones de la OFAC y la ONU** a través de su API oficial, y enviaría los datos de la reclamación al **motor antifraude corporativo** de Seguros Pepín —basado en reglas de negocio y modelos de *scoring* de riesgo LA/FT— para obtener una valoración fundamentada.
+**Mock → Integración real.** En el prototipo, la lista de sanciones está hardcodeada con 15 entradas representativas, los baselines de importe son valores estimados y el historial de duplicados está mockeado. En producción, cada detector se conectaría a su fuente real:
+
+| Detector | Fuente real |
+|---|---|
+| OFAC/ONU | API oficial de OFAC SDN + lista ONU consolidada |
+| Anomalía de importe | Cálculo dinámico sobre la tabla `claims` histórica de Seguros Pepín |
+| Duplicados | Consulta async a MariaDB con índice por `(client_id, claim_type, created_at)` |
+| Coherencia documental | Datos extraídos por el Agente C (capacidades VLM reales) |
 
 ### 3.3.5 `approve_payment`
 
