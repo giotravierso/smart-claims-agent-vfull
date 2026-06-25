@@ -116,11 +116,12 @@ st.set_page_config(
 st.markdown(f"""
 <style>
     #MainMenu, footer {{ visibility: hidden; }}
+    header[data-testid="stHeader"] {{ display: none; }}
     .stApp {{ background: {C_BG}; }}
     html, body, [class*="css"] {{
         font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }}
-    .block-container {{ padding-top: 1.2rem; max-width: 1180px; }}
+    .block-container {{ padding-top: 2.2rem; max-width: 1180px; }}
 
     .pill {{ display:inline-block; padding:4px 12px; border-radius:999px;
         font-size:12px; font-weight:600; }}
@@ -159,11 +160,12 @@ st.markdown(f"""
 
 st.markdown(f"""
 <div style="background:linear-gradient(90deg,{C_PRIMARY_DARK} 0%,{C_PRIMARY} 100%);
-     border-radius:10px;padding:15px 22px;margin-bottom:16px;display:flex;
+     border-radius:10px;padding:16px 22px;margin:4px 0 18px 0;display:flex;
      align-items:center;gap:14px;box-shadow:0 2px 6px rgba(0,0,0,.12)">
-  <img src="{LOGO_URL}" alt="" onerror="this.style.display='none'"
-       style="height:34px;background:#fff;padding:4px 8px;border-radius:6px"/>
-  <span style="color:#fff;font-size:22px;font-weight:700;letter-spacing:.2px">Smart-Claims Agent</span>
+  <span style="background:#fff;color:{C_PRIMARY};font-weight:800;font-size:12px;
+        padding:6px 11px;border-radius:6px;letter-spacing:.6px;white-space:nowrap">SEGUROS PEPÍN</span>
+  <span style="color:#fff;font-size:22px;font-weight:700;letter-spacing:.2px;
+        white-space:nowrap">Smart-Claims Agent</span>
   <span style="color:#cfe0f5;font-size:12px;margin-left:auto;text-align:right;line-height:1.35">
      Gestión agéntica de siniestros<br/>Seguros Pepín, S.A.</span>
 </div>
