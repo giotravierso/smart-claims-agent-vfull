@@ -855,7 +855,7 @@ El sistema puede operarse de tres formas complementarias:
 - **Modo 2 — App Streamlit (la demo principal):** interfaz web autónoma que invoca el grafo de agentes directamente en el mismo proceso Python, sin necesidad de Docker ni de MariaDB. Es la modalidad desplegada en Streamlit Community Cloud y la recomendada para la demostración en vivo ante el tribunal.
 - **Modo 3 — CLI de demostración y API REST:** la CLI ejecuta cuatro casos predefinidos desde línea de comandos y muestra el Chain of Thought; la API REST acepta peticiones HTTP desde curl, Postman o cualquier cliente.
 
-> **Nota sobre integraciones externas:** todas las herramientas que en producción consultarían sistemas reales de Seguros Pepín (motor antifraude OFAC, gestor documental, núcleo de pólizas, sistemas de pago) están implementadas como mocks deterministas o sobre datos reales de la empresa embebidos en ChromaDB. El LLM Claude de Anthropic es **opcional**: si se proporciona `ANTHROPIC_API_KEY`, cada agente genera razonamientos Chain of Thought con el modelo `claude-sonnet-4-6` y el Agente C realiza extracción multimodal real de documentos subidos; sin clave, el sistema usa un fallback determinista y la demo funciona de forma idéntica en cuanto a decisiones.
+> **Nota sobre integraciones externas:** todas las herramientas que en producción consultarían sistemas reales de Seguros Pepín (gestor documental, núcleo de pólizas, sistemas de pago, listas oficiales de sanciones) están implementadas como **mocks deterministas**, ya que el proyecto académico no tiene acceso a esos sistemas. En cambio, las **capacidades de IA del proyecto sí son reales**: la extracción multimodal (Agente C, Claude Vision), el RAG de cobertura (Agente D, ChromaDB) y el motor antifraude (Agente G) operan de verdad, **sobre datos sintéticos** (pólizas, lista OFAC y baselines de prototipo). El LLM Claude de Anthropic es **opcional**: si se proporciona `ANTHROPIC_API_KEY`, cada agente genera razonamientos Chain of Thought con `claude-sonnet-4-6` y el Agente C realiza extracción multimodal real; sin clave, el sistema usa un *fallback* determinista y la demo decide de forma idéntica.
 
 ---
 
@@ -1644,8 +1644,6 @@ Amershi, S., Weld, D., Vorvoreanu, M., Fourney, A., Nushi, B., Collisson, P., Su
 Anthropic. (2024). *Claude API documentation*. https://docs.anthropic.com
 
 FastAPI. (2024). *FastAPI documentation: Interactive API docs*. https://fastapi.tiangolo.com/features/
-
-Russell, S. (2021). *Human compatible: Artificial intelligence and the problem of control*. Viking.
 
 Vrána, J. (2024). *Adminer — Database management in a single PHP file*. https://www.adminer.org
 
