@@ -80,7 +80,11 @@ pueda validarse desde la propia máquina del tribunal—. La persistencia en Mar
 *best-effort*: en el entorno de evaluación, sin base de datos, se omite con un aviso y el
 flujo continúa.
 
+La evaluación se ejecuta deliberadamente **con el LLM externo desactivado**. Esto es posible porque, por diseño, la **decisión** del sistema es **determinista**: la toman las reglas (validación, motor antifraude de cuatro detectores, cobertura por RAG y umbral HITL), no el modelo generativo. El papel del LLM (Claude) es **enriquecer la traza de razonamiento (CoT)** y realizar la **extracción multimodal**, capacidades que se validan por separado (véase §4.8). Esta separación garantiza que las decisiones sean reproducibles y auditables, independientes de la variabilidad del modelo generativo.
+
 ## 4.4 Resultados globales
+
+El objetivo de esta evaluación es validar la **corrección de la lógica del flujo** end-to-end sobre casos representativos, no estimar el rendimiento en producción. Sobre un dataset sintético y determinista, el sistema produce la decisión esperada en todos los casos; este resultado debe leerse como evidencia de que la lógica de decisión (validación → extracción → fraude → cobertura → resolución) es correcta y reproducible, no como una métrica de precisión generalizable (véase §4.10).
 
 | Métrica | Valor |
 |---|---|
@@ -97,9 +101,7 @@ humana por importe. La **cobertura se decidió por RAG** en el 68,8 % de los cas
 resto no llega al Agente D porque se corta antes (documentación incompleta → solicitud de
 información; sanción OFAC → bloqueo).
 
-> Nota sobre tiempos: la latencia media observada está dominada por el *timeout* de
-> conexión a MariaDB en el entorno de evaluación (sin BD), debido a la persistencia
-> *best-effort*. El procesamiento agéntico en sí es de fracciones de segundo por caso.
+> **Latencia.** El procesamiento agéntico real es **sub-segundo**: una media de **~0,25 s** por caso (mediana ~0,33 s, máximo ~0,41 s), medido con la persistencia aislada y el RAG activo. Los casos que recorren el flujo completo con recuperación RAG tardan ~0,3–0,4 s; los que se cortan antes (documentación incompleta, bloqueo OFAC) se resuelven en milisegundos. Los ~10 s observados en una ejecución previa correspondían íntegramente al *timeout* de conexión a MariaDB en un entorno sin base de datos (persistencia *best-effort*), no al razonamiento del sistema.
 
 ## 4.5 Resultados por escenario
 
@@ -134,6 +136,9 @@ La evaluación confirma el funcionamiento de los detectores reales:
 - **Verificación OFAC/ONU:** los 2 expedientes con nombre sancionado se marcaron con
   veredicto **`BLOCKED`** y se resolvieron como `RECHAZO_FRAUDE`, demostrando que el
   *fuzzy matching* (umbral 0,82) contra la lista de sanciones funciona de extremo a extremo.
+  El bloqueo automático por OFAC se justifica como obligación legal vinculante (no discrecional),
+  a diferencia de la revisión humana por importe; podría derivarse a un oficial de cumplimiento
+  como refinamiento.
 - **Anomalía de importe (Z-score):** varios casos de importe elevado obtuvieron veredicto
   `MEDIUM_RISK` (el detector se activa, pero el score no alcanza el umbral de bloqueo de
   0,55). Es el comportamiento correcto: el sistema señala la anomalía sin bloquear, y la
@@ -151,10 +156,7 @@ evaluación reproducible.
 - **Suite de tests automatizados:** **47 tests** (pytest, SQLite en memoria) que cubren
   los agentes, la orquestación end-to-end, las herramientas, el motor antifraude, el RAG
   y la coherencia documental. Se ejecutan sin MariaDB ni Docker.
-- **Extracción multimodal real (Agente C):** validada por separado con Claude Vision sobre
-  un documento real (una factura), del que el modelo extrajo correctamente importe
-  (3.200,00 €), fecha y emisor (la evaluación por lotes usa los tipos de documento, no
-  imágenes reales, por lo que el VLM se demuestra de forma cualitativa en la interfaz).
+- **Extracción multimodal real (Agente C):** La extracción multimodal (Agente C) se evaluó con **6 documentos sintéticos** (facturas, acta policial e informe de taller) con *ground truth* conocido. Claude Vision (`claude-sonnet-4-6`) acertó **el 100 % de los campos** evaluados (17/17): tipo de documento 6/6, importe 5/5, fecha 6/6. Aun siendo una muestra pequeña sobre documentos sintéticos, confirma la fiabilidad de la extracción en condiciones controladas; una validación productiva requeriría un corpus mayor de documentos reales etiquetados.
 - **Demostración CLI/Streamlit:** ejecución de los cinco caminos del flujo con el Chain of
   Thought visible.
 

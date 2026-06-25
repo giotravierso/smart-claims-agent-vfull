@@ -86,6 +86,8 @@ Las señales se combinan en un **score compuesto** que produce un **veredicto gr
 
 **LLM opcional (`reasoning.py`).** Transversal a los agentes, el helper `reason()` enriquece el Chain of Thought de cada agente invocando a Claude (`claude-sonnet-4-6`) cuando la variable de entorno `ANTHROPIC_API_KEY` está disponible. En su ausencia, devuelve un *fallback* determinista que produce un razonamiento equivalente sin llamada externa. Esto garantiza una propiedad central: **la demostración funciona siempre**, con o sin conectividad al LLM, mitigando el riesgo de una caída de red o de cuota durante una defensa en vivo.
 
+**Agentes fuera del alcance del MVP.** El catálogo conceptual del proyecto contemplaba además dos agentes que quedan **fuera del alcance de esta entrega** y se reservan para una fase posterior: el **Agente F** (predicción de judicialización del siniestro, basado en aprendizaje automático clásico sobre el histórico de expedientes) y el **Agente H** (asistente legal para expedientes judicializados). Esta entrega implementa el núcleo *end-to-end* del ciclo de gestión (A, B, C, D, E y G); la numeración no correlativa —se pasa de E a G— responde precisamente a esa reserva de las letras F y H para funcionalidades de una fase productiva posterior.
+
 ## 4. Flujo de una reclamación
 
 El flujo nominal de extremo a extremo encadena los agentes en el orden:
@@ -227,6 +229,8 @@ El sistema incorpora un mecanismo de **Human-in-the-Loop** que reserva a un revi
 
 En ambos casos el expediente queda en estado `pending_review`. Las decisiones revisadas se registran en la tabla `hitl_feedback`, que conserva la acción original automática, la acción final adoptada y la razón del *override*. Este registro no solo cierra el bucle de auditoría, sino que constituye una fuente de datos para una eventual mejora futura de los criterios de decisión automáticos.
 
+Conviene precisar la diferencia de naturaleza entre los dos disparadores. La **revisión por importe** responde a una decisión de política discrecional: la organización elige a partir de qué cuantía prefiere supervisión humana, y ese umbral es configurable. La **coincidencia con listas de sanciones OFAC/ONU**, en cambio, constituye una obligación legal vinculante sin margen de discrecionalidad; por ello el sistema la trata como bloqueo automático (`RECHAZO_FRAUDE`) en lugar de derivarla a revisión. Como refinamiento, dicho bloqueo podría redirigirse a un oficial de cumplimiento (HITL de cumplimiento) para su confirmación formal, manteniendo el principio de intervención humana en los casos sensibles y creando además una traza documentada del proceso.
+
 ## 9. Despliegue y stack tecnológico
 
 ### 9.1. Despliegue
@@ -261,6 +265,8 @@ El sistema admite **dos modos de despliegue** complementarios.
 | Calidad | 47 tests automatizados (pytest) sobre SQLite en memoria, sin dependencia de MariaDB |
 
 En cuanto a la **calidad**, el proyecto cuenta con **47 pruebas automatizadas** ejecutadas con pytest sobre una base de datos SQLite en memoria, que cubren los agentes individuales, el flujo de orquestación completo, los detectores de fraude (incluida la coherencia documental), el RAG, la capa de repositorio, el helper de razonamiento y los endpoints de la API REST. Al no depender de MariaDB, la suite es reproducible en cualquier entorno.
+
+**Nota sobre localización.** Los identificadores de tipo de siniestro (`danys_propis`, `responsabilitat`, `robatori`, `danys_mecanics`) y la moneda de referencia (euros) se heredan del andamiaje inicial del prototipo. En una implantación real para Seguros Pepín (República Dominicana) se localizarían a castellano dominicano y a pesos dominicanos (DOP / RD$); las etiquetas visibles para el usuario ya se presentan en castellano. Esta adaptación afectaría únicamente a los valores de las enumeraciones internas y a la capa de presentación, sin alterar la lógica de los agentes.
 
 ## 10. Bibliografía
 

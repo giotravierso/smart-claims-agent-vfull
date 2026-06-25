@@ -222,6 +222,17 @@ reflejando el sistema ACTUAL: flujo `A→B→C→G→D→E`, Agente G con 4 dete
 Claude Vision real, Agente D con RAG real (ChromaDB), empresa real + Ley 172-13, 47 tests,
 despliegue Streamlit. Verificados contra el código por los redactores.
 
+**Hito 11.3 — Correcciones del peer review.**
+Tras una revisión por pares se corrigen: (1) contradicción del orden del Agente G entre documentos
+(el orden real es A→B→C→G→D→E; se alinean los 4 capítulos); (2) latencia limpia reportada (~0,25 s
+media, sin el timeout de MariaDB); (3) reencuadre del 100 % (lidera "corrección del flujo", caveat
+arriba); (4) párrafo explícito "evaluación con LLM apagado"; (5) justificación de la ausencia de los
+agentes F y H (fuera del MVP); (6) defensa del auto-rechazo OFAC frente al HITL discrecional;
+(7) evaluación del VLM ampliada a 6 documentos (100 % por campo, 17/17); (8,9) nota de localización
+de identificadores catalanes y moneda (EUR→DOP en producción); (10) APA unificado (Yao 2022, Russell
+2021). Se genera un documento combinado `MEMORIA-Entrega2.md` (portada + 4 capítulos + declaración de
+autoría) listo para PDF.
+
 **Hito 11.2 — Evaluación real (capítulo 04).**
 El evaluador oficial (`evaluate_dataset.py`) requiere Docker y su mapeo de resultados estaba
 desactualizado. Se añade `evaluate_inprocess.py` (in-process, sin Docker, vocabulario actual

@@ -108,6 +108,8 @@ Editar `.env` con los valores adecuados. La tabla siguiente describe las variabl
 | `ENVIRONMENT` | `development` | Entorno de ejecución |
 | `LOG_LEVEL` | `INFO` | Nivel de log del backend |
 
+> **Nota sobre moneda:** los importes se expresan en euros (€) como simplificación del prototipo; en una implantación para Seguros Pepín se localizarían a pesos dominicanos (DOP / RD$).
+
 ### 3.3 La clave `ANTHROPIC_API_KEY` y el modo fallback
 
 Esta variable controla el nivel de inteligencia real del sistema:
@@ -311,7 +313,7 @@ Pulsar **Procesar reclamación** envía el expediente al orquestador. Los ficher
   Viktor Nikolaev Kozlov
   ```
 
-- El Agente G realiza una comparación difusa (fuzzy matching) entre el nombre introducido y la lista de sanciones. Si la similitud supera el umbral, marca el expediente como `FLAGGED` y el orquestador termina el flujo con decisión `RECHAZO_FRAUDE`.
+- El Agente G realiza una comparación difusa (fuzzy matching) entre el nombre introducido y la lista de sanciones. Si la similitud supera el umbral, emite veredicto `BLOCKED` y el orquestador termina el flujo con decisión `RECHAZO_FRAUDE`.
 
 ### 5.6 Tipos de siniestro disponibles
 
@@ -341,7 +343,7 @@ Una vez procesado el expediente, la app muestra el resultado en varias secciones
 
 **Cribado antifraude (Agente G)**
 
-- Veredicto: `CLEAR` (verde) o `FLAGGED` (rojo).
+- Veredicto: `CLEAR` (verde), `MEDIUM_RISK` (amarillo), `HIGH_RISK` (naranja) o `BLOCKED` (rojo, coincidencia OFAC).
 - Score de riesgo numérico entre 0 y 1.
 
 **Cobertura (Agente D · RAG sobre pólizas)**
@@ -358,7 +360,7 @@ Una vez procesado el expediente, la app muestra el resultado en varias secciones
 
 - Timeline con una tarjeta por cada agente que intervino en el flujo.
 - Muestra el nombre del agente, la acción realizada y el razonamiento completo.
-- El orden de intervención es: A (triaje) → G (antifraude) → B (validación documental) → C (extracción) → D (cobertura) → E (resolución).
+- El orden de intervención es: A (triaje) → B (validación documental) → C (extracción multimodal) → G (fraude/cumplimiento) → D (cobertura) → E (resolución).
 
 ---
 
@@ -422,9 +424,9 @@ El script ejecuta cuatro expedientes con una semilla aleatoria fija (`random.see
 
   Razonamiento (Chain of Thought):
     1. Agente A: expediente DEMO-PAGO de tipo 'danys_propis' por importe 3200.0 EUR...
-    2. Agente G: riesgo de fraude 0.12, sin indicios relevantes.
-    3. Agente B: documentación completa y conforme.
-    4. Agente C: extraídos 3 documentos con confianza media 0.91.
+    2. Agente B: documentación completa y conforme.
+    3. Agente C: extraídos 3 documentos con confianza media 0.91.
+    4. Agente G: riesgo de fraude 0.12, sin indicios relevantes.
     5. Agente D: siniestro 'danys_propis' cubierto según SP-PCS-009 § 3.2.
     6. Agente E: cobertura confirmada y 2900.00 EUR dentro del umbral; PAGO aprobado.
 
@@ -580,7 +582,7 @@ Si el expediente no existe en la base de datos, la respuesta es `HTTP 404`.
 |---|---|---|---|
 | `PAGO` | Expediente aprobado. Pago procesado de forma autónoma (mock de transferencia). | `false` | `resolved` |
 | `RECHAZO` | Expediente rechazado por ausencia de cobertura en póliza. Se emite notificación al cliente (mock). | `false` | `rejected` |
-| `RECHAZO_FRAUDE` | Expediente bloqueado por el cribado antifraude: el Agente G marcó el caso como `FLAGGED`. | `false` | `rejected` |
+| `RECHAZO_FRAUDE` | Expediente bloqueado por el cribado antifraude: el Agente G emitió veredicto `HIGH_RISK` o `BLOCKED`. | `false` | `rejected` |
 | `REVISION_HUMANA` | El importe supera `HITL_AMOUNT_THRESHOLD` (5.000 € por defecto). Un operador humano debe revisar el expediente. | `true` | `pending_review` |
 | `INFO_REQUERIDA` | Documentación incompleta. El expediente queda en espera de los documentos pendientes. | `false` | `validating` |
 
@@ -592,14 +594,14 @@ El umbral es configurable sin necesidad de recompilar el código: basta con camb
 
 ### 7.3 Veredicto de fraude (Agente G)
 
-El Agente G actúa como filtro de entrada antes de los demás agentes especializados. Su motor antifraude combina cuatro detectores:
+El Agente G actúa como gate de cumplimiento tras la recepción documental (validación y extracción) y antes de la resolución, de modo que sus cuatro detectores —incluida la coherencia documental— disponen de los datos extraídos. Su motor antifraude combina cuatro detectores:
 
 1. **OFAC fuzzy:** comparación difusa entre el nombre del asegurado y la lista sintética de sanciones.
 2. **Importe anómalo:** detección por Z-score sobre el histórico de importes.
 3. **Duplicados:** comprobación de expedientes previos del mismo cliente.
-4. **Coherencia documental:** validación de consistencia entre el tipo de siniestro y los documentos aportados.
+4. **Coherencia documental:** coherencia temporal entre las fechas de los documentos (p. ej. que la factura no sea anterior al siniestro).
 
-El resultado del Agente G incluye un `verdict` (`CLEAR` o `FLAGGED`), un `risk_score` numérico entre 0 y 1, y el indicador `is_flagged`. Si el expediente es marcado, el orquestador termina el flujo con `RECHAZO_FRAUDE` sin invocar a los agentes B, C, D ni E.
+El resultado del Agente G incluye un `verdict` graduado (`CLEAR`, `MEDIUM_RISK`, `HIGH_RISK` o `BLOCKED`), un `risk_score` numérico entre 0 y 1, y el indicador `is_flagged`. El expediente se marca (`is_flagged=True`) y el orquestador termina el flujo con `RECHAZO_FRAUDE` solo si el veredicto es `HIGH_RISK` o `BLOCKED` (este último para coincidencia OFAC); en ese caso no se invocan los agentes D ni E (la validación B y la extracción C ya se han ejecutado antes).
 
 ### 7.4 Cobertura RAG (Agente D)
 
@@ -818,6 +820,6 @@ Anthropic. (2024). *Claude API documentation*. https://docs.anthropic.com
 
 FastAPI. (2024). *FastAPI documentation: Interactive API docs*. https://fastapi.tiangolo.com/features/
 
-Russell, S. (2019). *Human compatible: Artificial intelligence and the problem of control*. Viking.
+Russell, S. (2021). *Human compatible: Artificial intelligence and the problem of control*. Viking.
 
 Vrána, J. (2024). *Adminer — Database management in a single PHP file*. https://www.adminer.org
